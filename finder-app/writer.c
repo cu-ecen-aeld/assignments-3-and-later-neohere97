@@ -1,3 +1,11 @@
+//  /***************************************************************************
+//   * AESD Assignment 2
+//   * Author: Chinmay Shalawadi
+//   * Institution: University of Colorado Boulder
+//   * Mail id: chsh1552@colorado.edu
+//   * References: Stack Overflow, Man Pages
+//   ***************************************************************************/
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -7,22 +15,27 @@
 #include <fcntl.h>
 #include <syslog.h>
 
+// -----------------------------------main-----------------------------------------------------------
 int main(int argc, char *argv[])
 {
     openlog(NULL, 0, LOG_USER);
 
+    // check if there are two arguments
     if (argc == 3)
     {
-        if(!argv[2])
-        return 1;
+        // check if string null
+        if (!argv[2])
+            return 1;
 
         int fd;
+        ssize_t nr;
 
+        // open file with extra permissins and file mode    
         fd = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU | S_IRWXO);
 
-        ssize_t nr;
         if (fd > 0)
         {
+            //syslog when writing
             syslog(LOG_DEBUG, "Writing %s to %s", argv[2], argv[1]);
             nr = write(fd, argv[2], strlen(argv[2]));
             if (nr == -1)
@@ -44,3 +57,4 @@ int main(int argc, char *argv[])
     }
     return 0;
 }
+// ----------------------------------------End-----------------------------------------------------
