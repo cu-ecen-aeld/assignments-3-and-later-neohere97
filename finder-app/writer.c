@@ -40,10 +40,10 @@ int main(int argc, char *argv[])
             //syslog when writing
             syslog(LOG_DEBUG, "Writing %s to %s", argv[2], argv[1]);
             nr = write(fd, argv[2], strlen(argv[2]));
-            if (nr == -1)
+            if (nr == -1 || nr < strlen(argv[2]))
             {
-                printf("Write Failed \n");
-                syslog(LOG_ERR, "Write Failed nr -> %ld", nr);
+                printf("Write Failed or incomplete \n");
+                syslog(LOG_ERR, "Write Failed or incomplete nr -> %ld", nr);
                 return 1;
             }
         }
