@@ -42,12 +42,14 @@ int main(int argc, char *argv[])
             {
                 printf("Write Failed \n");
                 syslog(LOG_ERR, "Write Failed nr -> %ld", nr);
+                return 1;
             }
         }
         else
         {
             printf("Error opening the file \n");
             syslog(LOG_ERR, "Error Opening the file %s", argv[1]);
+            return 1;
         }
     }
     else
