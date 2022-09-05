@@ -18,6 +18,7 @@
 // -----------------------------------main-----------------------------------------------------------
 int main(int argc, char *argv[])
 {
+    // Initializing logging
     openlog(NULL, 0, LOG_USER);
 
     // check if there are two arguments
@@ -31,6 +32,7 @@ int main(int argc, char *argv[])
         ssize_t nr;
 
         // open file with extra permissins and file mode    
+        printf("Opening the file \n");
         fd = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU | S_IRWXO);
 
         if (fd > 0)
