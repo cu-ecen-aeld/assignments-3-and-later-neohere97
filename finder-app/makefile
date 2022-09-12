@@ -17,6 +17,6 @@ endif
 
 # Clean to remove binaries 
 clean:
-	rm -f *.o *.out
-	rm -f writer
+	rm -rf *.o *.out
+	rm -rf writer
 
