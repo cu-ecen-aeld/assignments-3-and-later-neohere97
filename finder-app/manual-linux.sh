@@ -36,8 +36,8 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     echo "Checking out version ${KERNEL_VERSION}"
     git checkout ${KERNEL_VERSION}
 
+    # apply patch yylloc since ubuntu 22.04LTS
     wget https://github.com/torvalds/linux/commit/e33a814e772cdc36436c8c188d8c42d019fda639.diff
-
     git apply e33a814e772cdc36436c8c188d8c42d019fda639.diff
 
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
@@ -47,6 +47,7 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} dtbs      
 fi
 
+# copoy image to outdir
 echo "Adding the Image in outdir"
 cp ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ${OUTDIR}
 
@@ -58,6 +59,7 @@ then
     sudo rm  -rf ${OUTDIR}/rootfs
 fi
 
+# Making Root Structure
 mkdir -p ${OUTDIR}/rootfs
 cd ${OUTDIR}/rootfs
 mkdir bin dev etc home lib lib64 proc sbin sys tmp usr var
@@ -84,6 +86,7 @@ cd ${OUTDIR}/rootfs
 ${CROSS_COMPILE}readelf -a bin/busybox | grep "program interpreter"
 ${CROSS_COMPILE}readelf -a bin/busybox | grep "Shared library"
 
+# Copy depenencies to rootfs
 cp -a $SYSROOT/lib/ld-linux-aarch64.so.1 lib
 cp -a $SYSROOT/lib64/ld-2.31.so lib64
 cp -a $SYSROOT/lib64/libm.so.6 lib64
@@ -105,6 +108,7 @@ make CROSS_COMPILE=${CROSS_COMPILE}
 
 cd ${OUTDIR}/rootfs
 
+# Copy test files
 cp ${FINDER_DIR}/finder.sh ${OUTDIR}/rootfs/home
 cp ${FINDER_DIR}/finder-test.sh ${OUTDIR}/rootfs/home
 cp ${FINDER_DIR}/autorun-qemu.sh ${OUTDIR}/rootfs/home
