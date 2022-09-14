@@ -1,11 +1,4 @@
-# /***************************************************************************
-#  * AESD Assignment 1
-#  * Author: Chinmay Shalawadi 
-#  * Institution: University of Colorado Boulder
-#  * Mail id: chsh1552@colorado.edu
-#  * References: Stack Overflow, Man Pages
-#  ***************************************************************************/
-#!/bin/bash
+#!/bin/sh
 filesdir=$1
 searchstr=$2
 
