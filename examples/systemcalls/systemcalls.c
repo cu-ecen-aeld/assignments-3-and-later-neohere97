@@ -54,6 +54,7 @@ bool do_exec(int count, ...)
 
     if (pid == -1)
     {
+    //avoid inline returns, update this
         return false;
     }
     else if (pid == 0)
