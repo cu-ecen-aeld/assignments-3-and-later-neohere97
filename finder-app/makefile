@@ -1,5 +1,5 @@
-CROSS_COMPILE=
-CC=gcc
+CROSS_COMPILE =
+CC = gcc
 
 all:
 	make clean
