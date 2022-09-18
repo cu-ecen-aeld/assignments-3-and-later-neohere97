@@ -5,3 +5,4 @@ crosstool-ng
 aesd-build
 .vscode/
 test.sh.log
+writer
