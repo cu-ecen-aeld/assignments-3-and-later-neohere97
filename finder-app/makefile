@@ -1,8 +1,7 @@
 CROSS_COMPILE =
 CC = gcc
 
-all:
-	make clean
+all:	
 	$(CROSS_COMPILE)$(CC) writer.c -Wall -Werror writer.c -o writer
 
 
