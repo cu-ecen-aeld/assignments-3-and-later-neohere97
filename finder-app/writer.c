@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
             if (nr == -1 || nr < strlen(argv[2]))
             {
                 printf("Write Failed or incomplete \n");
-                syslog(LOG_ERR, "Write Failed or incomplete nr -> %d", nr);
+                syslog(LOG_ERR, "Write Failed or incomplete nr -> %ld", nr);
                 return 1;
             }
         }
