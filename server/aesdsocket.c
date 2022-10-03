@@ -150,11 +150,11 @@ int main(int argc, char *argv[])
             if (buffer[bytes_from_client - 1] == '\n')
                 newlineflag = 1;
 
-            memcpy(buf + (buf_size_count ) * starter_buf_size, buffer, bytes_from_client);
+            memcpy(buf + (buf_size_count  * starter_buf_size), buffer, bytes_from_client);
 
             if (newlineflag)
             {
-                bytes_pending = (buf_size_count ) * starter_buf_size + bytes_from_client;
+                bytes_pending = (buf_size_count * starter_buf_size) + bytes_from_client;
                 break;
             }
             else
