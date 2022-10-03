@@ -16,13 +16,11 @@ int sockfd, new_conn_fd;
 char *buf;
 struct addrinfo *servinfo;
 struct sockaddr_storage new_conn;
-int fd;
 
 void sig_handler(int signum)
 {
     freeaddrinfo(servinfo);
     close(sockfd);
-    close(fd);
     free(buf);
     unlink(file);
     exit(EXIT_SUCCESS);
@@ -107,13 +105,11 @@ int main(int argc, char *argv[])
     int buffer_size = 4096;
     buf = malloc(sizeof(char) * buffer_size);
 
-     fd = open(file, O_CREAT | O_TRUNC | O_RDWR, S_IRWXU | S_IRWXO);
-
     while (1)
     {
         // TODO setup File creation/open file descriptor
 
-        
+        int fd;
         socklen_t addr_size;
         addr_size = sizeof(new_conn);
 
@@ -135,8 +131,6 @@ int main(int argc, char *argv[])
         char *read_buf;
         
         int pending_write_buffer = 0;
-
-       
         
         while (1)
         {
@@ -148,7 +142,7 @@ int main(int argc, char *argv[])
             {
                 // open file with extra permissins and file mode
                 // TODO handle open errors
-                
+                fd = open(file, O_CREAT | O_APPEND | O_RDWR, S_IRWXU | S_IRWXO);
                 if (fd == -1)
                     return -1;
 
@@ -172,7 +166,12 @@ int main(int argc, char *argv[])
 
                 send(new_conn_fd, read_buf, strlen(read_buf), 0);
                 free(read_buf);
-             
+
+                if (close(fd) == -1)
+                {
+                    perror("close");
+                }
+
                 pending_write_buffer = 0;
             }
             else
