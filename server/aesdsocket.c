@@ -21,7 +21,7 @@ int sockfd, new_conn_fd;
 char *buf;
 struct addrinfo *servinfo;
 struct sockaddr_storage new_conn;
-int fd; 
+int fd;
 
 void sig_handler(int signum)
 {
@@ -35,6 +35,7 @@ void sig_handler(int signum)
 int main(int argc, char *argv[])
 {
 
+    // Register Signal Handlers
     if (signal(SIGINT, sig_handler) == SIG_ERR)
     {
         exit(EXIT_FAILURE);
@@ -45,32 +46,33 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-
-    // Initializing logging
+    // Init Logging
     openlog(NULL, 0, LOG_USER);
-
-    int status;
-    struct addrinfo hints;
-
-    int initial_buffer_size = 512;
-    char buffer[initial_buffer_size];
-    buf = malloc(initial_buffer_size);
-    int buf_size = initial_buffer_size;
+    // -----------------------------------------Variables-declarations---------------------------------------------------------------------
+    // Buffer handling variables
+    int starter_buf_size = 512; // Buffer size to hold network packets
+    char buffer[starter_buf_size];
+    buf = malloc(starter_buf_size);
+    int buf_size = starter_buf_size;
     int bytes_from_client;
-    int temp_var = 0;
-    int buf_size_count = 1;
+    int buf_size_count = 0;
     int bytes_pending = 0;
-    int file_size = 0;
+    int fsize = 0;
     char addrstr[INET6_ADDRSTRLEN];
     int newlineflag = 0;
 
-
+    // Socket Variables & Declaration
+    int new_conn;
+    int status;
+    struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
-
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
+    struct sockaddr_storage test_addr;
+    socklen_t addr_size;
 
+    // -------------------------GetAddrInfo-Socket-Bind-----------------------------------------------------------------------------------
     if ((status = getaddrinfo(NULL, "9000", &hints, &servinfo)) != 0)
     {
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
@@ -82,7 +84,6 @@ int main(int argc, char *argv[])
         return -1;
 
     int yes = 1;
-
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes) == -1)
     {
         perror("setsockopt");
@@ -91,7 +92,7 @@ int main(int argc, char *argv[])
 
     if (bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen) == -1)
         return -1;
-
+    // -------------------------------Create-Daemon--after-bind-------------------------------------------------------------------------
     if (argc > 1)
     {
         char *daemon = "-d";
@@ -117,16 +118,9 @@ int main(int argc, char *argv[])
         }
     }
 
-    // TODO check for listen error
+    // -------------------------------Listen--------------------------------------------------------------------------------------------
     if (listen(sockfd, 5) == -1)
         return -1;
-
-    struct sockaddr_storage test_addr;
-
-    // socklen_t addr_size = sizeof test_addr; //Store address of client
-    socklen_t addr_size;
-
-    int new_conn;
 
     fd = open(file, O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
 
@@ -138,16 +132,8 @@ int main(int argc, char *argv[])
 
     while (1)
     {
-
         addr_size = sizeof test_addr;
-
         new_conn = accept(sockfd, (struct sockaddr *)&test_addr, &addr_size);
-
-        if (new_conn == -1)
-        {
-            perror("accept");
-            continue;
-        }
 
         struct sockaddr_in *p = (struct sockaddr_in *)&test_addr;
         syslog(LOG_DEBUG, "Accepted connection from %s", inet_ntop(AF_INET, &p->sin_addr, addrstr, sizeof(addrstr)));
@@ -156,66 +142,52 @@ int main(int argc, char *argv[])
         {
             bytes_from_client = recv(new_conn, buffer, sizeof(buffer), 0);
 
+            // When no bytes are sent, connection is closed
             if (bytes_from_client == 0)
                 break;
 
-            for (int i = 0; i < bytes_from_client; i++)
-            {
-                if (buffer[i] == '\n')
-                {
-                    newlineflag = 1;
-                    temp_var = i + 1;
-                    break;
-                }
-            }
+            // Check if the received packet ends with newline
+            if (buffer[bytes_from_client - 1] == '\n')
+                newlineflag = 1;
 
-            memcpy(buf + (buf_size_count - 1) * initial_buffer_size, buffer, bytes_from_client);
+            memcpy(buf + (buf_size_count ) * starter_buf_size, buffer, bytes_from_client);
 
             if (newlineflag == 1)
             {
-                bytes_pending = (buf_size_count - 1) * initial_buffer_size + temp_var;
+                bytes_pending = (buf_size_count ) * starter_buf_size + bytes_from_client;
                 break;
             }
             else
             {
-                buf = realloc(buf, (buf_size + initial_buffer_size));
-                buf_size += initial_buffer_size;
+                // When there is no newline increase the buffer by reallocation
+                buf = realloc(buf, (buf_size + starter_buf_size));
+                buf_size += starter_buf_size;
                 buf_size_count += 1;
             }
         }
-
         if (newlineflag == 1)
         {
+            // computing total file size
+            fsize += write(fd, buf, bytes_pending);
 
-            int nr = write(fd, buf, bytes_pending);
-            file_size += nr;
-
+            // Get back to the beginning of the file
             lseek(fd, 0, SEEK_SET);
 
-            char *read_buffer = (char *)malloc(file_size);
+            char *read_buffer = malloc(fsize);
 
-            ssize_t bytes_read = read(fd, read_buffer, file_size);
-            if (bytes_read == -1)
-                perror("read");
+            if (read(fd, read_buffer, fsize) == -1)
+                printf("Error reading !\n");
 
-            int bytes_sent = send(new_conn, read_buffer, file_size, 0);
-
-            if (bytes_sent == 0)
-            {
+            if (send(new_conn, read_buffer, fsize, 0) == 0)
                 printf("Error sending !\n");
-            }
 
             free(read_buffer);
-
-            memcpy(buf, buf + temp_var, buf_size - bytes_pending);
-            buf = realloc(buf, initial_buffer_size);
-            buf_size_count = 1;
+            memcpy(buf, buf + bytes_from_client, buf_size - bytes_pending);
+            buf = realloc(buf, starter_buf_size);
+            buf_size_count = 0;
             newlineflag = 0;
         }
-
         close(new_conn);
-        syslog(LOG_DEBUG, "Closed connection from %s", addrstr);
     }
-
     return 0;
 }
