@@ -62,6 +62,14 @@ int main(void)
     if (sockfd == -1)
         return -1;
 
+    int yes = 1;
+
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes) == -1)
+    {
+        perror("setsockopt");
+        exit(1);
+    }
+
     if (bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen) == -1)
         return -1;
 
@@ -171,8 +179,6 @@ int main(void)
                 break;
             }
         }
-
-        // TODO Exit when signal Interrupt is received
     }
 
     return 0;
