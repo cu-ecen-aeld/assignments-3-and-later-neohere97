@@ -26,9 +26,8 @@ void sig_handler(int signum)
     exit(EXIT_SUCCESS);
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
-    pid_t pid;
 
     if (signal(SIGINT, sig_handler) == SIG_ERR)
     {
@@ -73,22 +72,30 @@ int main(void)
     if (bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen) == -1)
         return -1;
 
-    pid = fork();
+    if (argc > 1)
+    {
+        char *daemon = "-d";
+        if (strcmp(argv[argc - 1], daemon) == 0)
+        {
+            pid_t pid;
+            pid = fork();
 
-    if (pid == -1)
-        return -1;
-    else if (pid != 0)
-        exit(EXIT_SUCCESS);
+            if (pid == -1)
+                return -1;
+            else if (pid != 0)
+                exit(EXIT_SUCCESS);
 
-    if (setsid() == -1)
-        return -1;
+            if (setsid() == -1)
+                return -1;
 
-    if (chdir("/") == -1)
-        return -1;
+            if (chdir("/") == -1)
+                return -1;
 
-    open("/dev/null", O_RDWR);
-    dup(0);
-    dup(0);
+            open("/dev/null", O_RDWR);
+            dup(0);
+            dup(0);
+        }
+    }
 
     // TODO check for listen error
     if (listen(sockfd, 5) == -1)
