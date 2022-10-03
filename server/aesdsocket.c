@@ -6,16 +6,22 @@
 #include <netdb.h>
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <syslog.h>
 #include <linux/fs.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <signal.h>
+
+#define BACKLOG 10
 
 const char *file = "/var/tmp/aesdsocketdata";
 int sockfd, new_conn_fd;
 char *buf;
 struct addrinfo *servinfo;
 struct sockaddr_storage new_conn;
+int fd; 
 
 void sig_handler(int signum)
 {
@@ -44,6 +50,19 @@ int main(int argc, char *argv[])
 
     int status;
     struct addrinfo hints;
+
+    int initial_buffer_size = 512;
+    char buffer[initial_buffer_size];
+    buf = malloc(initial_buffer_size);
+    int buf_size = initial_buffer_size;
+    int bytes_from_client;
+    int temp_var = 0;
+    int buf_size_count = 1;
+    int bytes_pending = 0;
+    int file_size = 0;
+    char addrstr[INET6_ADDRSTRLEN];
+    int newlineflag = 0;
+
 
     memset(&hints, 0, sizeof(hints));
 
@@ -101,96 +120,100 @@ int main(int argc, char *argv[])
     if (listen(sockfd, 5) == -1)
         return -1;
 
-    // TODO free sockaddr
-    int buffer_size = 4096;
-    buf = malloc(sizeof(char) * buffer_size);
+    struct sockaddr_storage test_addr;
+
+    // socklen_t addr_size = sizeof test_addr; //Store address of client
+    socklen_t addr_size;
+
+    int new_conn;
+
+    fd = open(file, O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
+
+    // In case of an error opening the file
+    if (fd == -1)
+    {
+        syslog(LOG_ERR, "Error opening file with error: %d", errno);
+    }
 
     while (1)
     {
-        // TODO setup File creation/open file descriptor
 
-        int fd;
-        socklen_t addr_size;
-        addr_size = sizeof(new_conn);
+        addr_size = sizeof test_addr;
 
-        // ssize_t nr;
+        new_conn = accept(sockfd, (struct sockaddr *)&test_addr, &addr_size);
 
-        // TODO log connected client IP address
-        new_conn_fd = accept(sockfd, (struct sockaddr *)&new_conn, &addr_size);
-        if (new_conn_fd == -1)
-            return -1;
+        if (new_conn == -1)
+        {
+            perror("accept");
+            continue;
+        }
 
-        // struct sockaddr client_info;
-        // socklen_t addrlen;
-        // addrlen = sizeof(struct sockaddr);
+        struct sockaddr_in *p = (struct sockaddr_in *)&test_addr;
+        syslog(LOG_DEBUG, "Accepted connection from %s", inet_ntop(AF_INET, &p->sin_addr, addrstr, sizeof(addrstr)));
 
-        // TODO handle error for gerpeername
-        // getpeername(new_conn_fd, &client_info, &addrlen);
-
-        int recv_return;
-        char *read_buf;
-        
-        int pending_write_buffer = 0;
-        
         while (1)
         {
-            recv_return = recv(new_conn_fd, &buf[pending_write_buffer], buffer_size - pending_write_buffer, 0);
-            if (recv_return == -1)
-                return -1;
+            bytes_from_client = recv(new_conn, buffer, sizeof(buffer), 0);
 
-            if (buf[(pending_write_buffer + recv_return) - 1] == '\n')
+            if (bytes_from_client == 0)
+                break;
+
+            for (int i = 0; i < bytes_from_client; i++)
             {
-                // open file with extra permissins and file mode
-                // TODO handle open errors
-                fd = open(file, O_CREAT | O_APPEND | O_RDWR, S_IRWXU | S_IRWXO);
-                if (fd == -1)
-                    return -1;
-
-                // printf("Writing to file %ld bytes \n", strlen(buf));
-                if (write(fd, buf, strlen(buf)) == -1)
-                    return -1;
-
-                if (lseek(fd, 0, SEEK_END) == -1)
-
-                    return -1;
-
-                long filesize = lseek(fd, 0, SEEK_CUR);
-                if (filesize == -1)
-                    return -1;
-
-                if (lseek(fd, 0, SEEK_SET) == -1)
-                    return -1;
-
-                read_buf = malloc(filesize+1);
-                read(fd, read_buf, filesize);
-
-                send(new_conn_fd, read_buf, strlen(read_buf), 0);
-                free(read_buf);
-
-                if (close(fd) == -1)
+                if (buffer[i] == '\n')
                 {
-                    perror("close");
+                    newlineflag = 1;
+                    temp_var = i + 1;
+                    break;
                 }
+            }
 
-                pending_write_buffer = 0;
+            memcpy(buf + (buf_size_count - 1) * initial_buffer_size, buffer, bytes_from_client);
+
+            if (newlineflag == 1)
+            {
+                bytes_pending = (buf_size_count - 1) * initial_buffer_size + temp_var;
+                break;
             }
             else
             {
-                pending_write_buffer = pending_write_buffer + recv_return;
-                buffer_size = buffer_size + recv_return;
-                buf = realloc(buf, sizeof(char) * (buffer_size+recv_return));
-            }
-
-            // TODO Log Connection close
-            if (recv_return == 0)
-            {
-                close(new_conn_fd);
-                break;
+                buf = realloc(buf, (buf_size + initial_buffer_size));
+                buf_size += initial_buffer_size;
+                buf_size_count += 1;
             }
         }
-        buffer_size = 4096;
-        buf = realloc(buf, sizeof(char) * (buffer_size));
 
+        if (newlineflag == 1)
+        {
+
+            int nr = write(fd, buf, bytes_pending);
+            file_size += nr;
+
+            lseek(fd, 0, SEEK_SET);
+
+            char *read_buffer = (char *)malloc(file_size);
+
+            ssize_t bytes_read = read(fd, read_buffer, file_size);
+            if (bytes_read == -1)
+                perror("read");
+
+            int bytes_sent = send(new_conn, read_buffer, file_size, 0);
+
+            if (bytes_sent == 0)
+            {
+                printf("Error sending !\n");
+            }
+
+            free(read_buffer);
+
+            memcpy(buf, buf + temp_var, buf_size - bytes_pending);
+            buf = realloc(buf, initial_buffer_size);
+            buf_size_count = 1;
+            newlineflag = 0;
+        }
+
+        close(new_conn);
+        syslog(LOG_DEBUG, "Closed connection from %s", addrstr);
     }
 
     return 0;
