@@ -152,7 +152,7 @@ int main(int argc, char *argv[])
 
             memcpy(buf + (buf_size_count ) * starter_buf_size, buffer, bytes_from_client);
 
-            if (newlineflag == 1)
+            if (newlineflag)
             {
                 bytes_pending = (buf_size_count ) * starter_buf_size + bytes_from_client;
                 break;
@@ -165,7 +165,7 @@ int main(int argc, char *argv[])
                 buf_size_count += 1;
             }
         }
-        if (newlineflag == 1)
+        if (newlineflag)
         {
             // computing total file size
             fsize += write(fd, buf, bytes_pending);
@@ -187,6 +187,7 @@ int main(int argc, char *argv[])
             buf_size_count = 0;
             newlineflag = 0;
         }
+        
         close(new_conn);
     }
     return 0;
