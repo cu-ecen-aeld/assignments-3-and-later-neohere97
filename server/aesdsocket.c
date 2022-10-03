@@ -45,6 +45,7 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
+
     // Initializing logging
     openlog(NULL, 0, LOG_USER);
 
