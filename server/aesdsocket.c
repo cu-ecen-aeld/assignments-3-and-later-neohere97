@@ -1,3 +1,11 @@
+//  /***************************************************************************
+//   * AESD Assignment 5
+//   * Author: Chinmay Shalawadi
+//   * Institution: University of Colorado Boulder
+//   * Mail id: chsh1552@colorado.edu
+//   * References: Stack Overflow, Man Pages, Beejus
+//   ***************************************************************************/
+
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
