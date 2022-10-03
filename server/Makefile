@@ -2,6 +2,7 @@ CROSS_COMPILE =
 CC = gcc
 
 all:
+		make clean
 		$(CROSS_COMPILE)$(CC) -Wall -Werror aesdsocket.c -o aesdsocket
 
 
