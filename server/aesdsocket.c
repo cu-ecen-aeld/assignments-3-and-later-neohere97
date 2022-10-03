@@ -102,6 +102,8 @@ int main(int argc, char *argv[])
         return -1;
 
     // TODO free sockaddr
+    int buffer_size = 4096;
+    buf = malloc(sizeof(char) * buffer_size);
 
     while (1)
     {
@@ -127,9 +129,9 @@ int main(int argc, char *argv[])
 
         int recv_return;
         char *read_buf;
-        int buffer_size = 4096;
+        
         int pending_write_buffer = 0;
-        buf = malloc(sizeof(char) * buffer_size);
+        
         while (1)
         {
             recv_return = recv(new_conn_fd, &buf[pending_write_buffer], buffer_size - pending_write_buffer, 0);
@@ -159,7 +161,7 @@ int main(int argc, char *argv[])
                 if (lseek(fd, 0, SEEK_SET) == -1)
                     return -1;
 
-                read_buf = malloc(filesize + 1);
+                read_buf = malloc(filesize+1);
                 read(fd, read_buf, filesize);
 
                 send(new_conn_fd, read_buf, strlen(read_buf), 0);
@@ -176,7 +178,7 @@ int main(int argc, char *argv[])
             {
                 pending_write_buffer = pending_write_buffer + recv_return;
                 buffer_size = buffer_size + recv_return;
-                buf = realloc(buf, buffer_size + recv_return);
+                buf = realloc(buf, sizeof(char) * (buffer_size+recv_return));
             }
 
             // TODO Log Connection close
@@ -186,6 +188,9 @@ int main(int argc, char *argv[])
                 break;
             }
         }
+        buffer_size = 4096;
+        buf = realloc(buf, sizeof(char) * (buffer_size));
+
     }
 
     return 0;
