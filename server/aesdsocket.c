@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/signal.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <string.h>
@@ -21,86 +22,209 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <stdint.h>
 
-#define BACKLOG 10
+#define BACKLOG (10)
+#define RECEIVE_BUFFER (1024)
+#define SEND_BUFFER (1024)
+#define TEMP_BUFFER (1024)
 
-const char *file = "/var/tmp/aesdsocketdata";
-int sockfd, new_conn_fd;
-char *buf;
-struct addrinfo *servinfo;
-struct sockaddr_storage new_conn;
-int fd;
+static void register_signal_handlers();
+static void bind_to_port(char *port);
+static void open_temp_file(char *file);
+static void daemonify(int argc, char *argv[]);
+static void accept_connections_loop();
+static void set_up_buffers();
+static void write_to_file();
+static void send_file();
 
-void sig_handler(int signum)
+struct globals_aesdsocket
 {
-    freeaddrinfo(servinfo);
-    close(sockfd);
-    free(buf);
-    unlink(file);
-    exit(EXIT_SUCCESS);
-}
+    int sockfd;
+    int filefd;
+    int conn_fd;
+    char *receive_buffer;
+    char *send_buffer;
+    char *temp_buffer;
+    int temp_buffer_writehead;
+    int temp_buffer_size;
+    int file_writehead;
+
+} aesdsocket;
 
 int main(int argc, char *argv[])
 {
-
-    // Register Signal Handlers
-    if (signal(SIGINT, sig_handler) == SIG_ERR)
-    {
-        exit(EXIT_FAILURE);
-    }
-
-    if (signal(SIGTERM, sig_handler) == SIG_ERR)
-    {
-        exit(EXIT_FAILURE);
-    }
-
     // Init Logging
     openlog(NULL, 0, LOG_USER);
-    // -----------------------------------------Variables-declarations---------------------------------------------------------------------
-    // Buffer handling variables
-    int starter_buf_size = 512; // Buffer size to hold network packets
-    char buffer[starter_buf_size];
-    buf = malloc(starter_buf_size);
-    int buf_size = starter_buf_size;
-    int bytes_from_client;
-    int buf_size_count = 0;
-    int bytes_pending = 0;
-    int fsize = 0;
-    char addrstr[INET6_ADDRSTRLEN];
-    int newlineflag = 0;
 
-    // Socket Variables & Declaration
-    int new_conn;
-    int status;
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE;
+    register_signal_handlers();
+
+    bind_to_port("9000");
+
+    daemonify(argc, argv);
+
+    open_temp_file("/var/tmp/aesdsocketdata");
+
+    while (1)
+    {
+        printf("Accepting Connections...\n");
+        accept_connections_loop();
+    }
+    return 0;
+}
+
+static void accept_connections_loop()
+{
     struct sockaddr_storage test_addr;
     socklen_t addr_size;
+    addr_size = sizeof(test_addr);
 
-    // -------------------------GetAddrInfo-Socket-Bind-----------------------------------------------------------------------------------
-    if ((status = getaddrinfo(NULL, "9000", &hints, &servinfo)) != 0)
+    aesdsocket.conn_fd = accept(aesdsocket.sockfd, (struct sockaddr *)&test_addr, &addr_size);
+
+    if (aesdsocket.conn_fd == -1)
     {
-        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
-        exit(1);
+        perror("accept():");
+    }
+    else
+    {
+        char addrstr[INET6_ADDRSTRLEN];
+        struct sockaddr_in *p = (struct sockaddr_in *)&test_addr;
+        syslog(LOG_DEBUG, "Accepted connection from %s",
+               inet_ntop(AF_INET, &p->sin_addr, addrstr, sizeof(addrstr)));
+
+        printf("Accepted Connection \n");
+        int bytes_received;
+
+        set_up_buffers();
+
+        while (1)
+        {
+
+            bytes_received = recv(aesdsocket.conn_fd,
+                                  aesdsocket.receive_buffer,
+                                  RECEIVE_BUFFER,
+                                  0);
+
+            if (bytes_received == -1)
+            {
+                perror("recv():");
+            }
+
+            if (bytes_received == 0)
+            {
+                printf("Closing the connection \n");
+                close(aesdsocket.conn_fd);
+                break;
+            }
+
+            memcpy(&aesdsocket.temp_buffer[aesdsocket.temp_buffer_writehead], aesdsocket.receive_buffer, bytes_received);
+            aesdsocket.temp_buffer_writehead = bytes_received;
+
+            int i;
+            for (i = 0; i < bytes_received; i++)
+            {
+                if (aesdsocket.temp_buffer[i] == '\n')
+                    break;
+            }
+
+            if ((bytes_received - 1) == i)
+            {
+                write_to_file();
+                send_file();                
+            }
+            else
+            {
+                aesdsocket.temp_buffer = reallocarray(aesdsocket.temp_buffer, (size_t)(aesdsocket.temp_buffer_size + TEMP_BUFFER) )
+            }
+
+            // printf("length of received buffer is %ld \n", strlen(aesdsocket.receive_buffer));
+        }
+
+        free(aesdsocket.receive_buffer);
+        free(aesdsocket.temp_buffer);
+        free(aesdsocket.send_buffer);
+    }
+}
+
+
+static void send_file(){
+    lseek(aesdsocket.filefd, 0, SEEK_SET);
+
+    read(aesdsocket.filefd, aesdsocket.send_buffer, aesdsocket.file_writehead);
+
+    send(aesdsocket.conn_fd, aesdsocket.send_buffer, aesdsocket.file_writehead,0);
+
+}
+
+static void write_to_file()
+{
+
+    if (write(aesdsocket.filefd,
+              aesdsocket.temp_buffer, 
+              (size_t) aesdsocket.temp_buffer_writehead) != aesdsocket.temp_buffer_writehead)
+    {
+        printf("ERR! write didn't write everything \n");
     }
 
-    sockfd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
-    if (sockfd == -1)
-        return -1;
+    aesdsocket.file_writehead += aesdsocket.temp_buffer_writehead;
+    aesdsocket.temp_buffer_writehead = 0;
+}
 
-    int yes = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes) == -1)
+static void set_up_buffers()
+{
+
+    printf("Allocating memory for buffers:");
+    aesdsocket.receive_buffer = (char *)calloc((size_t)RECEIVE_BUFFER, sizeof(char));
+    if (aesdsocket.receive_buffer == NULL)
     {
-        perror("setsockopt");
-        exit(1);
+        printf("Error allocating memeroy for receive buffer \n");
+        exit(EXIT_FAILURE);
     }
 
-    if (bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen) == -1)
-        return -1;
-    // -------------------------------Create-Daemon--after-bind-------------------------------------------------------------------------
+    aesdsocket.temp_buffer = (char *)calloc((size_t)TEMP_BUFFER, sizeof(char));
+    if (aesdsocket.temp_buffer == NULL)
+    {
+        printf("Error allocating memeroy for temp buffer \n");
+        exit(EXIT_FAILURE);
+    }
+    aesdsocket.temp_buffer_writehead = 0;
+    aesdsocket.temp_buffer_size = TEMP_BUFFER;
+
+    aesdsocket.send_buffer = (char *)calloc((size_t)SEND_BUFFER, sizeof(char));
+    if (aesdsocket.send_buffer == NULL)
+    {
+        printf("Error allocating memeroy for send buffer \n");
+        exit(EXIT_FAILURE);
+    }
+    printf("SUCCESS\n");
+}
+
+static void open_temp_file(char *file)
+{
+    printf("Opening file:%s:", file);
+
+    aesdsocket.filefd = open(file, O_RDWR | O_CREAT | O_TRUNC,
+                             S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
+
+    if (aesdsocket.filefd == -1)
+    {
+        syslog(LOG_ERR, "Error opening file with error: %d", errno);
+        exit(EXIT_FAILURE);
+    }
+
+    aesdsocket.file_writehead = 0;
+    printf("SUCCESS\n");
+}
+
+void sig_handler()
+{
+    printf("In signal handler, exiting \n");
+    exit(0);
+}
+
+static void daemonify(int argc, char *argv[])
+{
+
     if (argc > 1)
     {
         char *daemon = "-d";
@@ -110,93 +234,109 @@ int main(int argc, char *argv[])
             pid = fork();
 
             if (pid == -1)
-                return -1;
+                exit(EXIT_FAILURE);
             else if (pid != 0)
                 exit(EXIT_SUCCESS);
 
             if (setsid() == -1)
-                return -1;
+                exit(EXIT_FAILURE);
 
             if (chdir("/") == -1)
-                return -1;
+                exit(EXIT_FAILURE);
 
             open("/dev/null", O_RDWR);
             dup(0);
             dup(0);
         }
+        printf("Attempting to become a Daemon:SUCCESS\n");
     }
+}
 
-    // -------------------------------Listen--------------------------------------------------------------------------------------------
-    if (listen(sockfd, 5) == -1)
-        return -1;
+static void bind_to_port(char *port)
+{
+    int status, yes = 1;
+    struct addrinfo hints;
+    struct addrinfo *servinfo;
 
-    fd = open(file, O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
+    memset(&hints, 0, sizeof(hints));
 
-    // In case of an error opening the file
-    if (fd == -1)
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+
+    printf("Getting address info to bind to:");
+    if ((status = getaddrinfo(NULL, port, &hints, &servinfo)) != 0)
     {
-        syslog(LOG_ERR, "Error opening file with error: %d", errno);
+        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
+        exit(1);
     }
+    printf("SUCCESS\n");
 
-    while (1)
+    printf("Registering the Socket and Getting Sockfd:");
+    aesdsocket.sockfd = socket(servinfo->ai_family,
+                               servinfo->ai_socktype,
+                               servinfo->ai_protocol);
+    if (aesdsocket.sockfd == -1)
     {
-        addr_size = sizeof test_addr;
-        new_conn = accept(sockfd, (struct sockaddr *)&test_addr, &addr_size);
-
-        struct sockaddr_in *p = (struct sockaddr_in *)&test_addr;
-        syslog(LOG_DEBUG, "Accepted connection from %s", inet_ntop(AF_INET, &p->sin_addr, addrstr, sizeof(addrstr)));
-
-        while (1)
-        {
-            bytes_from_client = recv(new_conn, buffer, sizeof(buffer), 0);
-
-            // When no bytes are sent, connection is closed
-            if (bytes_from_client == 0)
-                break;
-
-            // Check if the received packet ends with newline
-            if (buffer[bytes_from_client - 1] == '\n')
-                newlineflag = 1;
-
-            memcpy(buf + (buf_size_count  * starter_buf_size), buffer, bytes_from_client);
-
-            if (newlineflag)
-            {
-                bytes_pending = (buf_size_count * starter_buf_size) + bytes_from_client;
-                break;
-            }
-            else
-            {
-                // When there is no newline increase the buffer by reallocation
-                buf = realloc(buf, (buf_size + starter_buf_size));
-                buf_size += starter_buf_size;
-                buf_size_count += 1;
-            }
-        }
-        if (newlineflag)
-        {
-            // computing total file size
-            fsize += write(fd, buf, bytes_pending);
-
-            // Get back to the beginning of the file
-            lseek(fd, 0, SEEK_SET);
-
-            char *read_buffer = malloc(fsize);
-
-            if (read(fd, read_buffer, fsize) == -1)
-                printf("Error reading !\n");
-
-            if (send(new_conn, read_buffer, fsize, 0) == 0)
-                printf("Error sending !\n");
-
-            free(read_buffer);
-            memcpy(buf, buf + bytes_from_client, buf_size - bytes_pending);
-            buf = realloc(buf, starter_buf_size);
-            buf_size_count = 0;
-            newlineflag = 0;
-        }
-        
-        close(new_conn);
+        perror("socket():");
+        exit(1);
     }
-    return 0;
+    printf("SUCCESS\n");
+
+    if (setsockopt(aesdsocket.sockfd,
+                   SOL_SOCKET,
+                   SO_REUSEADDR,
+                   &yes,
+                   sizeof(yes)) == -1)
+    {
+        perror("setsockopt");
+        exit(1);
+    }
+
+    printf("Attempting to bind to port: ");
+    if (bind(aesdsocket.sockfd, servinfo->ai_addr, servinfo->ai_addrlen) == -1)
+    {
+        perror("bind()");
+
+        exit(1);
+    }
+    printf("SUCCESS\n");
+    freeaddrinfo(servinfo);
+
+    printf("Listening to port %s:", port);
+    if (listen(aesdsocket.sockfd, BACKLOG) == -1)
+    {
+
+        perror("listen():");
+        exit(1);
+    }
+    printf("SUCCESS\n");
+}
+
+static void register_signal_handlers()
+{
+
+    struct sigaction act;
+
+    act.sa_handler = &sig_handler;
+
+    sigfillset(&act.sa_mask);
+
+    act.sa_flags = SA_RESTART;
+
+    printf("Registering signal handler SIGINT:");
+    if (sigaction(SIGINT, &act, NULL) == -1)
+    {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+    printf("SUCCESS\n");
+
+    printf("Registering signal handler SIGTERM:");
+    if (sigaction(SIGTERM, &act, NULL) == -1)
+    {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+    printf("SUCCESS\n");
 }
