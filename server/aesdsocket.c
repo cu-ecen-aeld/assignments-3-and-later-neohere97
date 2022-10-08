@@ -143,7 +143,7 @@ static void accept_connections_loop()
             else
             {
                 printf("Reallocing \n");
-                aesdsocket.temp_buffer = reallocarray(aesdsocket.temp_buffer,
+                aesdsocket.temp_buffer = (char *)reallocarray(aesdsocket.temp_buffer,
                                                       (size_t)(aesdsocket.temp_buffer_size + TEMP_BUFFER),
                                                       sizeof(char));
                 aesdsocket.temp_buffer_size += TEMP_BUFFER;
