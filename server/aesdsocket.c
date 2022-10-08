@@ -141,20 +141,18 @@ static void accept_connections_loop()
                 newlineflag = 0;
             }
             else
-            {
-                printf("Reallocing \n");
-                aesdsocket.temp_buffer = (char *)reallocarray(aesdsocket.temp_buffer,
-                                                      (size_t)(aesdsocket.temp_buffer_size + TEMP_BUFFER),
+            {                
+                aesdsocket.temp_buffer = (char *)realloc(aesdsocket.temp_buffer,
+                                                      ((size_t)(aesdsocket.temp_buffer_size + TEMP_BUFFER))*
                                                       sizeof(char));
                 aesdsocket.temp_buffer_size += TEMP_BUFFER;
-            }
-
-            // printf("length of received buffer is %ld \n", strlen(aesdsocket.receive_buffer));
+            }            
         }
 
         free(aesdsocket.receive_buffer);
         free(aesdsocket.temp_buffer);
         free(aesdsocket.send_buffer);
+        close(aesdsocket.conn_fd);
     }
 }
 
@@ -238,6 +236,9 @@ static void open_temp_file(char *file)
 void sig_handler()
 {
     printf("In signal handler, exiting \n");
+    close(aesdsocket.sockfd);
+    unlink("/var/tmp/aesdsocketdata");
+
     exit(0);
 }
 
