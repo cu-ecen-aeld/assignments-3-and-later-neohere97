@@ -93,7 +93,7 @@ static void accept_connections_loop()
                inet_ntop(AF_INET, &p->sin_addr, addrstr, sizeof(addrstr)));
 
         printf("Accepted Connection \n");
-        int bytes_received;
+        int bytes_received, newlineflag = 0;
 
         set_up_buffers();
 
@@ -117,24 +117,36 @@ static void accept_connections_loop()
                 break;
             }
 
-            memcpy(&aesdsocket.temp_buffer[aesdsocket.temp_buffer_writehead], aesdsocket.receive_buffer, bytes_received);
-            aesdsocket.temp_buffer_writehead = bytes_received;
+            memcpy(&aesdsocket.temp_buffer[aesdsocket.temp_buffer_writehead],
+                   aesdsocket.receive_buffer,
+                   bytes_received);
+
+            aesdsocket.temp_buffer_writehead += bytes_received;
 
             int i;
-            for (i = 0; i < bytes_received; i++)
+            for (i = 0; i < aesdsocket.temp_buffer_writehead; i++)
             {
                 if (aesdsocket.temp_buffer[i] == '\n')
+                {
+                    newlineflag = 1;
                     break;
+                }
             }
 
-            if ((bytes_received - 1) == i)
+            if (newlineflag)
             {
+
                 write_to_file();
-                send_file();                
+                send_file();
+                newlineflag = 0;
             }
             else
             {
-                aesdsocket.temp_buffer = reallocarray(aesdsocket.temp_buffer, (size_t)(aesdsocket.temp_buffer_size + TEMP_BUFFER) )
+                printf("Reallocing \n");
+                aesdsocket.temp_buffer = reallocarray(aesdsocket.temp_buffer,
+                                                      (size_t)(aesdsocket.temp_buffer_size + TEMP_BUFFER),
+                                                      sizeof(char));
+                aesdsocket.temp_buffer_size += TEMP_BUFFER;
             }
 
             // printf("length of received buffer is %ld \n", strlen(aesdsocket.receive_buffer));
@@ -146,22 +158,29 @@ static void accept_connections_loop()
     }
 }
 
-
-static void send_file(){
+static void send_file()
+{    
     lseek(aesdsocket.filefd, 0, SEEK_SET);
 
-    read(aesdsocket.filefd, aesdsocket.send_buffer, aesdsocket.file_writehead);
+    int chunk = SEND_BUFFER;
+    int current_filehead = aesdsocket.file_writehead;
 
-    send(aesdsocket.conn_fd, aesdsocket.send_buffer, aesdsocket.file_writehead,0);
+    while (current_filehead > 0)
+    {
+        if (current_filehead < SEND_BUFFER)
+            chunk = current_filehead;       
+        read(aesdsocket.filefd, aesdsocket.send_buffer, chunk);
+        send(aesdsocket.conn_fd, aesdsocket.send_buffer, chunk, 0);
 
+        current_filehead -= chunk;
+    }
 }
 
 static void write_to_file()
-{
-
+{    
     if (write(aesdsocket.filefd,
-              aesdsocket.temp_buffer, 
-              (size_t) aesdsocket.temp_buffer_writehead) != aesdsocket.temp_buffer_writehead)
+              aesdsocket.temp_buffer,
+              (size_t)aesdsocket.temp_buffer_writehead) != aesdsocket.temp_buffer_writehead)
     {
         printf("ERR! write didn't write everything \n");
     }
