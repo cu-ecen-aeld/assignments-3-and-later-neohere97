@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/signal.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <string.h>
@@ -24,11 +25,14 @@
 #include <signal.h>
 #include <stdint.h>
 
+
+//-----------------------Global--Defines-----------------------------
 #define BACKLOG (10)
 #define RECEIVE_BUFFER (1024)
 #define SEND_BUFFER (1024)
 #define TEMP_BUFFER (1024)
 
+//--------------------Function Declarations--------------------------------
 static void register_signal_handlers();
 static void bind_to_port(char *port);
 static void open_temp_file(char *file);
@@ -38,6 +42,7 @@ static void set_up_buffers();
 static void write_to_file();
 static void send_file();
 
+//--------------------Globals-Struct---------------------------------------
 struct globals_aesdsocket
 {
     int sockfd;
@@ -52,6 +57,7 @@ struct globals_aesdsocket
 
 } aesdsocket;
 
+// ---------------------------------main--------------------------------------------
 int main(int argc, char *argv[])
 {
     // Init Logging
@@ -73,6 +79,8 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+
+// ---------------------------------accept_connections_loop--------------------------------------------
 static void accept_connections_loop()
 {
     struct sockaddr_storage test_addr;
@@ -141,12 +149,12 @@ static void accept_connections_loop()
                 newlineflag = 0;
             }
             else
-            {                
+            {
                 aesdsocket.temp_buffer = (char *)realloc(aesdsocket.temp_buffer,
-                                                      ((size_t)(aesdsocket.temp_buffer_size + TEMP_BUFFER))*
-                                                      sizeof(char));
+                                                         ((size_t)(aesdsocket.temp_buffer_size + TEMP_BUFFER)) *
+                                                            sizeof(char));
                 aesdsocket.temp_buffer_size += TEMP_BUFFER;
-            }            
+            }
         }
 
         free(aesdsocket.receive_buffer);
@@ -156,9 +164,14 @@ static void accept_connections_loop()
     }
 }
 
+
+// ---------------------------------send_file--------------------------------------------
 static void send_file()
-{    
-    lseek(aesdsocket.filefd, 0, SEEK_SET);
+{
+    //TODO add mutex protection
+    if(lseek(aesdsocket.filefd, 0, SEEK_SET) == -1 ){
+        perror("lseek():");
+    }
 
     int chunk = SEND_BUFFER;
     int current_filehead = aesdsocket.file_writehead;
@@ -166,16 +179,24 @@ static void send_file()
     while (current_filehead > 0)
     {
         if (current_filehead < SEND_BUFFER)
-            chunk = current_filehead;       
-        read(aesdsocket.filefd, aesdsocket.send_buffer, chunk);
-        send(aesdsocket.conn_fd, aesdsocket.send_buffer, chunk, 0);
+            chunk = current_filehead;
+
+        if(read(aesdsocket.filefd, aesdsocket.send_buffer, chunk) == -1){
+            perror("read():");
+        }
+
+        if(send(aesdsocket.conn_fd, aesdsocket.send_buffer, chunk, 0) == -1){
+            perror("send():");
+        }
 
         current_filehead -= chunk;
     }
 }
 
+
+// ---------------------------------write_to_file--------------------------------------------
 static void write_to_file()
-{    
+{
     if (write(aesdsocket.filefd,
               aesdsocket.temp_buffer,
               (size_t)aesdsocket.temp_buffer_writehead) != aesdsocket.temp_buffer_writehead)
@@ -187,6 +208,7 @@ static void write_to_file()
     aesdsocket.temp_buffer_writehead = 0;
 }
 
+// ---------------------------------set_up_buffers--------------------------------------------
 static void set_up_buffers()
 {
 
@@ -216,6 +238,7 @@ static void set_up_buffers()
     printf("SUCCESS\n");
 }
 
+// ---------------------------------open_temp_file--------------------------------------------
 static void open_temp_file(char *file)
 {
     printf("Opening file:%s:", file);
@@ -232,16 +255,15 @@ static void open_temp_file(char *file)
     aesdsocket.file_writehead = 0;
     printf("SUCCESS\n");
 }
-
+// ---------------------------------sig_handler--------------------------------------------
 void sig_handler()
-{
-    printf("In signal handler, exiting \n");
+{    
     close(aesdsocket.sockfd);
     unlink("/var/tmp/aesdsocketdata");
-
-    exit(0);
+    exit(EXIT_SUCCESS);
 }
 
+// -----------------------------------daemonify---------------------------------------------
 static void daemonify(int argc, char *argv[])
 {
 
@@ -272,6 +294,7 @@ static void daemonify(int argc, char *argv[])
     }
 }
 
+// -----------------------------bind_to_port----------------------------------------
 static void bind_to_port(char *port)
 {
     int status, yes = 1;
@@ -333,6 +356,7 @@ static void bind_to_port(char *port)
     printf("SUCCESS\n");
 }
 
+// --------------------------register_signal_handlers------------------------------------------
 static void register_signal_handlers()
 {
 
@@ -360,3 +384,4 @@ static void register_signal_handlers()
     }
     printf("SUCCESS\n");
 }
+// ---------------------------------End--------------------------------------------
