@@ -16,6 +16,7 @@
 #include <netdb.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <syslog.h>
@@ -39,6 +40,8 @@ static void daemonify(int argc, char *argv[]);
 static void accept_connections_loop();
 static void write_to_file();
 static void send_file();
+static void write_timestamp();
+static void start_timer();
 
 //--------------------Globals-Struct---------------------------------------
 struct globals_aesdsocket
@@ -48,6 +51,8 @@ struct globals_aesdsocket
     int file_writehead;
 
 } aesdsocket;
+
+// pthread_mutex_t file_mutex;
 
 // ---------------------------------main--------------------------------------------
 int main(int argc, char *argv[])
@@ -63,12 +68,29 @@ int main(int argc, char *argv[])
 
     open_temp_file("/var/tmp/aesdsocketdata");
 
+    start_timer();
+
     while (1)
     {
         printf("Accepting Connections...\n");
         accept_connections_loop();
     }
     return 0;
+}
+
+static void write_timestamp()
+{
+    time_t timer;
+    char buffer[26], finalString[40];
+    struct tm *tm_info;
+
+    timer = time(NULL);
+    tm_info = localtime(&timer);
+
+    strftime(buffer, 26, "%a, %d %b %Y %T %z", tm_info);
+    sprintf(finalString, "timestamp:%s\n", buffer);
+
+    write_to_file(finalString, strlen(finalString));
 }
 
 // ---------------------------------accept_connections_loop--------------------------------------------
@@ -88,7 +110,7 @@ static void accept_connections_loop()
     else
     {
         char addrstr[INET6_ADDRSTRLEN];
-        
+
         struct sockaddr_in *p = (struct sockaddr_in *)&test_addr;
         syslog(LOG_DEBUG, "Accepted connection from %s",
                inet_ntop(AF_INET, &p->sin_addr, addrstr, sizeof(addrstr)));
@@ -244,11 +266,19 @@ static void open_temp_file(char *file)
     printf("SUCCESS\n");
 }
 // ---------------------------------sig_handler--------------------------------------------
-void sig_handler()
+void sig_handler(int signo)
 {
-    close(aesdsocket.sockfd);
-    unlink("/var/tmp/aesdsocketdata");
-    exit(EXIT_SUCCESS);
+    if (signo == SIGALRM)
+    {        
+        write_timestamp();
+    }
+
+    if (signo == SIGINT || signo == SIGTERM)
+    {
+        close(aesdsocket.sockfd);
+        unlink("/var/tmp/aesdsocketdata");
+        exit(EXIT_SUCCESS);
+    }
 }
 
 // -----------------------------------daemonify---------------------------------------------
@@ -371,5 +401,29 @@ static void register_signal_handlers()
         exit(EXIT_FAILURE);
     }
     printf("SUCCESS\n");
+
+    printf("Registering signal handler SIGALRM:");
+    if (sigaction(SIGALRM, &act, NULL) == -1)
+    {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+    printf("SUCCESS\n");
+}
+
+static void start_timer()
+{
+    struct itimerval delay;
+    int ret;
+    delay.it_value.tv_sec = 0;
+    delay.it_value.tv_usec = 500;
+    delay.it_interval.tv_sec = 10;
+    delay.it_interval.tv_usec = 0;
+    ret = setitimer(ITIMER_REAL, &delay, NULL);
+    if (ret)
+    {
+        perror("setitimer");
+        return;
+    }
 }
 // ---------------------------------End--------------------------------------------
