@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/signal.h>
 #include <sys/time.h>
+#include <sys/queue.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <string.h>
@@ -40,7 +41,8 @@ typedef struct thread_data
     pthread_t threadID;
     int conn_fd;
     int thread_complete_flag;
-    struct thread_data *next;
+    SLIST_ENTRY(thread_data)
+    entries;
 } thread_data;
 
 struct globals_aesdsocket
@@ -49,19 +51,23 @@ struct globals_aesdsocket
     int filefd;
     int file_writehead;
     thread_data head;
-
+    pthread_mutex_t file_mutex;
 } aesdsocket;
+
+SLIST_HEAD(slisthead, thread_data);
 
 //--------------------Function Declarations--------------------------------
 static void register_signal_handlers();
 static void bind_to_port(char *port);
 static void open_temp_file(char *file);
 static void daemonify(int argc, char *argv[]);
-static void accept_connections_loop();
+static void accept_connections_loop(struct slisthead *head);
 static void write_to_file();
 static void send_file();
 static void write_timestamp();
 static void start_timer();
+static void *thread_function(void *threadparams);
+// static void create_head_element();
 
 // ---------------------------------main--------------------------------------------
 
@@ -74,15 +80,21 @@ int main(int argc, char *argv[])
 
     bind_to_port("9000");
 
+    pthread_mutex_init(&aesdsocket.file_mutex, NULL);
+
     daemonify(argc, argv);
 
     open_temp_file("/var/tmp/aesdsocketdata");
 
     start_timer();
 
+    struct slisthead head;
+
+    SLIST_INIT(&head);
+
     while (1)
     {
-        accept_connections_loop();
+        accept_connections_loop(&head);
     }
     return 0;
 }
@@ -103,8 +115,9 @@ static void write_timestamp()
 }
 
 // ---------------------------------accept_connections_loop--------------------------------------------
-static void accept_connections_loop()
+static void accept_connections_loop(struct slisthead *head)
 {
+
     struct sockaddr_storage test_addr;
     socklen_t addr_size;
     addr_size = sizeof(test_addr);
@@ -128,90 +141,112 @@ static void accept_connections_loop()
         struct sockaddr_in *p = (struct sockaddr_in *)&test_addr;
         syslog(LOG_DEBUG, "Accepted connection from %s",
                inet_ntop(AF_INET, &p->sin_addr, addrstr, sizeof(addrstr)));
-        int bytes_received, newlineflag = 0;
 
-        char *receive_buffer, *temp_buffer;
-        int temp_buffer_writehead, temp_buffer_size;
+        thread_data *new_node = NULL;
 
-        printf("Allocating memory for buffers:");
-        receive_buffer = (char *)calloc((size_t)RECEIVE_BUFFER, sizeof(char));
+        new_node = malloc(sizeof(thread_data));
 
-        if (receive_buffer == NULL)
+        new_node->conn_fd = conn_fd;
+        new_node->thread_complete_flag = 0;
+        SLIST_INSERT_HEAD(head, new_node, entries);
+        pthread_create(&(new_node->threadID), NULL, thread_function, new_node);
+
+        thread_data *test;
+
+        SLIST_FOREACH(test, head, entries)
         {
-            printf("Error allocating memeroy for receive buffer \n");
-            exit(EXIT_FAILURE);
-        }
-
-        temp_buffer = (char *)calloc((size_t)TEMP_BUFFER, sizeof(char));
-        if (temp_buffer == NULL)
-        {
-            printf("Error allocating memeroy for temp buffer \n");
-            exit(EXIT_FAILURE);
-        }
-        temp_buffer_writehead = 0;
-        temp_buffer_size = TEMP_BUFFER;
-
-        printf("SUCCESS\n");
-
-        while (1)
-        {
-
-            bytes_received = recv(conn_fd, receive_buffer, RECEIVE_BUFFER, 0);
-
-            if (bytes_received == -1)
-                perror("recv():");
-
-            if (bytes_received == 0)
+            if (test->thread_complete_flag)
             {
-                printf("Closing the connection \n");
-                close(conn_fd);
-                break;
-            }
-
-            memcpy(&temp_buffer[temp_buffer_writehead], receive_buffer, bytes_received);
-            temp_buffer_writehead += bytes_received;
-
-            int i;
-            for (i = 0; i < temp_buffer_writehead; i++)
-            {
-                if (temp_buffer[i] == '\n')
-                {
-                    newlineflag = 1;
-                    break;
-                }
-            }
-
-            if (newlineflag)
-            {
-
-                write_to_file(temp_buffer, temp_buffer_writehead);
-                temp_buffer_writehead = 0;
-
-                send_file(conn_fd);
-                newlineflag = 0;
-            }
-            else
-            {
-                temp_buffer = (char *)realloc(temp_buffer,
-                                              ((size_t)(temp_buffer_size + TEMP_BUFFER)) *
-                                                  sizeof(char));
-                temp_buffer_size += TEMP_BUFFER;
+                pthread_join(test->threadID, NULL);
+                SLIST_REMOVE(head, test, thread_data, entries);
+                free(test);
             }
         }
-
-        free(receive_buffer);
-        free(temp_buffer);
-        close(conn_fd);
     }
 }
 
-// static void *thread_function(void *threadparams)
-// {
-//     thread_data *data = (thread_data *)threadparams;
+static void *thread_function(void *threadparams)
+{
+    thread_data *data = (thread_data *)threadparams;
 
-//     data->thread_complete_flag = 1;
-//     pthread_exit((void *)0);
-// }
+    int bytes_received, newlineflag = 0;
+
+    char *receive_buffer, *temp_buffer;
+    int temp_buffer_writehead, temp_buffer_size;
+
+    // printf("Allocating memory for buffers:");
+    receive_buffer = (char *)calloc((size_t)RECEIVE_BUFFER, sizeof(char));
+
+    if (receive_buffer == NULL)
+    {
+        printf("Error allocating memeroy for receive buffer \n");
+        exit(EXIT_FAILURE);
+    }
+
+    temp_buffer = (char *)calloc((size_t)TEMP_BUFFER, sizeof(char));
+    if (temp_buffer == NULL)
+    {
+        printf("Error allocating memeroy for temp buffer \n");
+        exit(EXIT_FAILURE);
+    }
+    temp_buffer_writehead = 0;
+    temp_buffer_size = TEMP_BUFFER;
+
+    printf("SUCCESS\n");
+
+    while (1)
+    {
+
+        bytes_received = recv(data->conn_fd, receive_buffer, RECEIVE_BUFFER, 0);
+
+        if (bytes_received == -1)
+            perror("recv():");
+
+        if (bytes_received == 0)
+        {
+            printf("Closing the connection \n");
+            close(data->conn_fd);
+            break;
+        }
+
+        memcpy(&temp_buffer[temp_buffer_writehead], receive_buffer, bytes_received);
+        temp_buffer_writehead += bytes_received;
+
+        int i;
+        for (i = 0; i < temp_buffer_writehead; i++)
+        {
+            if (temp_buffer[i] == '\n')
+            {
+                newlineflag = 1;
+                break;
+            }
+        }
+
+        if (newlineflag)
+        {
+
+            write_to_file(temp_buffer, temp_buffer_writehead);
+            temp_buffer_writehead = 0;
+
+            send_file(data->conn_fd);
+            newlineflag = 0;
+        }
+        else
+        {
+            temp_buffer = (char *)realloc(temp_buffer,
+                                          ((size_t)(temp_buffer_size + TEMP_BUFFER)) *
+                                              sizeof(char));
+            temp_buffer_size += TEMP_BUFFER;
+        }
+    }
+
+    free(receive_buffer);
+    free(temp_buffer);
+    close(data->conn_fd);
+
+    data->thread_complete_flag = 1;
+    pthread_exit((void *)0);
+}
 
 // ---------------------------------send_file--------------------------------------------
 static void send_file(int conn_fd)
@@ -238,10 +273,12 @@ static void send_file(int conn_fd)
         if (current_filehead < SEND_BUFFER)
             chunk = current_filehead;
 
+        pthread_mutex_lock(&aesdsocket.file_mutex);
         if (read(aesdsocket.filefd, send_buffer, chunk) == -1)
         {
             perror("read():");
         }
+        pthread_mutex_unlock(&aesdsocket.file_mutex);
 
         if (send(conn_fd, send_buffer, chunk, 0) == -1)
         {
@@ -257,6 +294,7 @@ static void send_file(int conn_fd)
 // ---------------------------------write_to_file--------------------------------------------
 static void write_to_file(char *buffer, int buffer_size)
 {
+    pthread_mutex_lock(&aesdsocket.file_mutex);
     if (write(aesdsocket.filefd,
               buffer,
               (size_t)buffer_size) != buffer_size)
@@ -266,6 +304,7 @@ static void write_to_file(char *buffer, int buffer_size)
     }
 
     aesdsocket.file_writehead += buffer_size;
+    pthread_mutex_unlock(&aesdsocket.file_mutex);
 }
 
 // ---------------------------------open_temp_file--------------------------------------------
