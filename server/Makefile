@@ -1,13 +1,16 @@
-CROSS_COMPILE =
-CC = gcc
+CROSS_COMPILE ?= 
+CC ?= $(CROSS_COMPILE)gcc
+CFLAGS ?= -Wall -Werror
+TARGET ?= aesdsocket
+LDFLAGS ?= -pthread
 
 all:
 		make clean
-		$(CROSS_COMPILE)$(CC) -Wall -Werror -pthread aesdsocket.c -o aesdsocket
+		$(CC) $(CFLAGS) $(LDFLAGS) aesdsocket.c -o $(TARGET)
 
 
 default:
-		$(CROSS_COMPILE)$(CC) -Wall -Werror -pthread aesdsocket.c -o aesdsocket
+		$(CC) $(CFLAGS) $(LDFLAGS) aesdsocket.c -o $(TARGET)
 
 
 # Clean to remove binaries 
