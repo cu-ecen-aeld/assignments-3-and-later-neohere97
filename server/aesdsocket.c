@@ -152,9 +152,10 @@ static void accept_connections_loop(struct slisthead *head)
         pthread_create(&(new_node->threadID), NULL, thread_function, new_node);
 
         thread_data *test;
+        thread_data *temp;
 
     
-        SLIST_FOREACH(test, head, entries)
+        SLIST_FOREACH_SAFE(test, head, entries,temp)
         {
             if (test->thread_complete_flag)
             {
