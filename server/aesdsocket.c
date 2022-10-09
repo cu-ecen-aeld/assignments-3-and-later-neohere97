@@ -12,7 +12,7 @@
 #include <sys/stat.h>
 #include <sys/signal.h>
 #include <sys/time.h>
-#include <sys/queue.h>
+#include "queue.h"
 #include <unistd.h>
 #include <netdb.h>
 #include <string.h>
@@ -66,7 +66,7 @@ static void write_to_file();
 static void send_file();
 static void write_timestamp();
 static void start_timer();
-static void *thread_function(void *threadparams);
+void *thread_function(void *threadparams);
 // static void create_head_element();
 
 // ---------------------------------main--------------------------------------------
@@ -153,6 +153,7 @@ static void accept_connections_loop(struct slisthead *head)
 
         thread_data *test;
 
+    
         SLIST_FOREACH(test, head, entries)
         {
             if (test->thread_complete_flag)
@@ -165,7 +166,7 @@ static void accept_connections_loop(struct slisthead *head)
     }
 }
 
-static void *thread_function(void *threadparams)
+void *thread_function(void *threadparams)
 {
     thread_data *data = (thread_data *)threadparams;
 
@@ -244,8 +245,8 @@ static void *thread_function(void *threadparams)
     free(temp_buffer);
     close(data->conn_fd);
 
-    data->thread_complete_flag = 1;
-    pthread_exit((void *)0);
+    data->thread_complete_flag = 1;    
+    return NULL;
 }
 
 // ---------------------------------send_file--------------------------------------------
