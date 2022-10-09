@@ -25,7 +25,6 @@
 #include <signal.h>
 #include <stdint.h>
 
-
 //-----------------------Global--Defines-----------------------------
 #define BACKLOG (10)
 #define RECEIVE_BUFFER (1024)
@@ -38,7 +37,6 @@ static void bind_to_port(char *port);
 static void open_temp_file(char *file);
 static void daemonify(int argc, char *argv[]);
 static void accept_connections_loop();
-static void set_up_buffers();
 static void write_to_file();
 static void send_file();
 
@@ -47,12 +45,6 @@ struct globals_aesdsocket
 {
     int sockfd;
     int filefd;
-    int conn_fd;
-    char *receive_buffer;
-    char *send_buffer;
-    char *temp_buffer;
-    int temp_buffer_writehead;
-    int temp_buffer_size;
     int file_writehead;
 
 } aesdsocket;
@@ -79,23 +71,24 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-
 // ---------------------------------accept_connections_loop--------------------------------------------
 static void accept_connections_loop()
 {
     struct sockaddr_storage test_addr;
     socklen_t addr_size;
     addr_size = sizeof(test_addr);
+    int conn_fd;
 
-    aesdsocket.conn_fd = accept(aesdsocket.sockfd, (struct sockaddr *)&test_addr, &addr_size);
+    conn_fd = accept(aesdsocket.sockfd, (struct sockaddr *)&test_addr, &addr_size);
 
-    if (aesdsocket.conn_fd == -1)
+    if (conn_fd == -1)
     {
         perror("accept():");
     }
     else
     {
         char addrstr[INET6_ADDRSTRLEN];
+        
         struct sockaddr_in *p = (struct sockaddr_in *)&test_addr;
         syslog(LOG_DEBUG, "Accepted connection from %s",
                inet_ntop(AF_INET, &p->sin_addr, addrstr, sizeof(addrstr)));
@@ -103,38 +96,51 @@ static void accept_connections_loop()
         printf("Accepted Connection \n");
         int bytes_received, newlineflag = 0;
 
-        set_up_buffers();
+        char *receive_buffer, *temp_buffer;
+        int temp_buffer_writehead, temp_buffer_size;
+
+        printf("Allocating memory for buffers:");
+        receive_buffer = (char *)calloc((size_t)RECEIVE_BUFFER, sizeof(char));
+
+        if (receive_buffer == NULL)
+        {
+            printf("Error allocating memeroy for receive buffer \n");
+            exit(EXIT_FAILURE);
+        }
+
+        temp_buffer = (char *)calloc((size_t)TEMP_BUFFER, sizeof(char));
+        if (temp_buffer == NULL)
+        {
+            printf("Error allocating memeroy for temp buffer \n");
+            exit(EXIT_FAILURE);
+        }
+        temp_buffer_writehead = 0;
+        temp_buffer_size = TEMP_BUFFER;
+
+        printf("SUCCESS\n");
 
         while (1)
         {
 
-            bytes_received = recv(aesdsocket.conn_fd,
-                                  aesdsocket.receive_buffer,
-                                  RECEIVE_BUFFER,
-                                  0);
+            bytes_received = recv(conn_fd, receive_buffer, RECEIVE_BUFFER, 0);
 
             if (bytes_received == -1)
-            {
                 perror("recv():");
-            }
 
             if (bytes_received == 0)
             {
                 printf("Closing the connection \n");
-                close(aesdsocket.conn_fd);
+                close(conn_fd);
                 break;
             }
 
-            memcpy(&aesdsocket.temp_buffer[aesdsocket.temp_buffer_writehead],
-                   aesdsocket.receive_buffer,
-                   bytes_received);
-
-            aesdsocket.temp_buffer_writehead += bytes_received;
+            memcpy(&temp_buffer[temp_buffer_writehead], receive_buffer, bytes_received);
+            temp_buffer_writehead += bytes_received;
 
             int i;
-            for (i = 0; i < aesdsocket.temp_buffer_writehead; i++)
+            for (i = 0; i < temp_buffer_writehead; i++)
             {
-                if (aesdsocket.temp_buffer[i] == '\n')
+                if (temp_buffer[i] == '\n')
                 {
                     newlineflag = 1;
                     break;
@@ -144,32 +150,41 @@ static void accept_connections_loop()
             if (newlineflag)
             {
 
-                write_to_file();
-                send_file();
+                write_to_file(temp_buffer, temp_buffer_writehead);
+                temp_buffer_writehead = 0;
+
+                send_file(conn_fd);
                 newlineflag = 0;
             }
             else
             {
-                aesdsocket.temp_buffer = (char *)realloc(aesdsocket.temp_buffer,
-                                                         ((size_t)(aesdsocket.temp_buffer_size + TEMP_BUFFER)) *
-                                                            sizeof(char));
-                aesdsocket.temp_buffer_size += TEMP_BUFFER;
+                temp_buffer = (char *)realloc(temp_buffer,
+                                              ((size_t)(temp_buffer_size + TEMP_BUFFER)) *
+                                                  sizeof(char));
+                temp_buffer_size += TEMP_BUFFER;
             }
         }
 
-        free(aesdsocket.receive_buffer);
-        free(aesdsocket.temp_buffer);
-        free(aesdsocket.send_buffer);
-        close(aesdsocket.conn_fd);
+        free(receive_buffer);
+        free(temp_buffer);
+        close(conn_fd);
     }
 }
 
-
 // ---------------------------------send_file--------------------------------------------
-static void send_file()
+static void send_file(int conn_fd)
 {
-    //TODO add mutex protection
-    if(lseek(aesdsocket.filefd, 0, SEEK_SET) == -1 ){
+    char *send_buffer;
+
+    send_buffer = (char *)calloc((size_t)SEND_BUFFER, sizeof(char));
+    if (send_buffer == NULL)
+    {
+        printf("Error allocating memeroy for send buffer \n");
+        exit(EXIT_FAILURE);
+    }
+    // TODO add mutex protection
+    if (lseek(aesdsocket.filefd, 0, SEEK_SET) == -1)
+    {
         perror("lseek():");
     }
 
@@ -181,61 +196,34 @@ static void send_file()
         if (current_filehead < SEND_BUFFER)
             chunk = current_filehead;
 
-        if(read(aesdsocket.filefd, aesdsocket.send_buffer, chunk) == -1){
+        if (read(aesdsocket.filefd, send_buffer, chunk) == -1)
+        {
             perror("read():");
         }
 
-        if(send(aesdsocket.conn_fd, aesdsocket.send_buffer, chunk, 0) == -1){
+        if (send(conn_fd, send_buffer, chunk, 0) == -1)
+        {
             perror("send():");
         }
 
         current_filehead -= chunk;
     }
-}
 
+    free(send_buffer);
+}
 
 // ---------------------------------write_to_file--------------------------------------------
-static void write_to_file()
+static void write_to_file(char *buffer, int buffer_size)
 {
     if (write(aesdsocket.filefd,
-              aesdsocket.temp_buffer,
-              (size_t)aesdsocket.temp_buffer_writehead) != aesdsocket.temp_buffer_writehead)
+              buffer,
+              (size_t)buffer_size) != buffer_size)
     {
         printf("ERR! write didn't write everything \n");
-    }
-
-    aesdsocket.file_writehead += aesdsocket.temp_buffer_writehead;
-    aesdsocket.temp_buffer_writehead = 0;
-}
-
-// ---------------------------------set_up_buffers--------------------------------------------
-static void set_up_buffers()
-{
-
-    printf("Allocating memory for buffers:");
-    aesdsocket.receive_buffer = (char *)calloc((size_t)RECEIVE_BUFFER, sizeof(char));
-    if (aesdsocket.receive_buffer == NULL)
-    {
-        printf("Error allocating memeroy for receive buffer \n");
         exit(EXIT_FAILURE);
     }
 
-    aesdsocket.temp_buffer = (char *)calloc((size_t)TEMP_BUFFER, sizeof(char));
-    if (aesdsocket.temp_buffer == NULL)
-    {
-        printf("Error allocating memeroy for temp buffer \n");
-        exit(EXIT_FAILURE);
-    }
-    aesdsocket.temp_buffer_writehead = 0;
-    aesdsocket.temp_buffer_size = TEMP_BUFFER;
-
-    aesdsocket.send_buffer = (char *)calloc((size_t)SEND_BUFFER, sizeof(char));
-    if (aesdsocket.send_buffer == NULL)
-    {
-        printf("Error allocating memeroy for send buffer \n");
-        exit(EXIT_FAILURE);
-    }
-    printf("SUCCESS\n");
+    aesdsocket.file_writehead += buffer_size;
 }
 
 // ---------------------------------open_temp_file--------------------------------------------
@@ -257,7 +245,7 @@ static void open_temp_file(char *file)
 }
 // ---------------------------------sig_handler--------------------------------------------
 void sig_handler()
-{    
+{
     close(aesdsocket.sockfd);
     unlink("/var/tmp/aesdsocketdata");
     exit(EXIT_SUCCESS);
