@@ -71,7 +71,7 @@ static void write_timestamp();
 static void start_timer();
 static void setup_send_buffer();
 static void cleanup(struct slisthead *head);
-static void join_cleanup_threads(struct slisthead *head);
+static void join_threads(struct slisthead *head);
 void *thread_function(void *threadparams);
 
 // ---------------------------------setup_send_buffer--------------------------------------------
@@ -123,14 +123,14 @@ int main(int argc, char *argv[])
             cleanup(&head);
         }
 
-        join_cleanup_threads(&head);
+        join_threads(&head);
         accept_connections_loop(&head);
     }
     return 0;
 }
-// ---------------------------------join_cleanup_threads--------------------------------------------
+// ---------------------------------join_threads--------------------------------------------
 
-static void join_cleanup_threads(struct slisthead *head)
+static void join_threads(struct slisthead *head)
 {
     thread_data *thread, *temp;
 
