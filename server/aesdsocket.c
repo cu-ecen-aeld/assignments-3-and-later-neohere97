@@ -206,7 +206,7 @@ void *thread_function(void *threadparams)
 
 
     int bytes_received, newlineflag = 0;
-    char *receive_buffer, *temp_buffer;
+    char *receive_buffer;
     // The below two variables track the total size of temp buffer as it gets reallocated
     // writehead also tracks the current capacity/where to write next
     int temp_buffer_writehead, temp_buffer_size;
@@ -221,12 +221,12 @@ void *thread_function(void *threadparams)
     }
 
     // Allocating and Initializing the temp buffer
-    temp_buffer = (char *)calloc((size_t)TEMP_BUFFER, sizeof(char));
-    if (temp_buffer == NULL)
-    {
-        printf("Error allocating memeroy for temp buffer \n");
-        exit(EXIT_FAILURE);
-    }
+    // temp_buffer = (char *)calloc((size_t)TEMP_BUFFER, sizeof(char));
+    // if (temp_buffer == NULL)
+    // {
+    //     printf("Error allocating memeroy for temp buffer \n");
+    //     exit(EXIT_FAILURE);
+    // }
 
     // Initializing the temp buffer trackers
     temp_buffer_writehead = 0;
@@ -235,7 +235,7 @@ void *thread_function(void *threadparams)
     while (1)
     {
 
-        bytes_received = recv(data->conn_fd, receive_buffer, RECEIVE_BUFFER, 0);
+        bytes_received = recv(data->conn_fd, &(receive_buffer[temp_buffer_writehead]), RECEIVE_BUFFER, 0);
 
         if (bytes_received == -1)
         {
@@ -251,7 +251,7 @@ void *thread_function(void *threadparams)
 
         // This copies the data from the receive buffer of fixed size to 
         // variable size temp buffer. There by keeping the receive buffer clean
-        memcpy(&temp_buffer[temp_buffer_writehead], receive_buffer, bytes_received);
+        // memcpy(&temp_buffer[temp_buffer_writehead], receive_buffer, bytes_received);
         //Updating the buffer writehead after data is copied
         temp_buffer_writehead += bytes_received;
 
@@ -259,7 +259,7 @@ void *thread_function(void *threadparams)
         int i;
         for (i = 0; i < temp_buffer_writehead; i++)
         {
-            if (temp_buffer[i] == '\n')
+            if (receive_buffer[i] == '\n')
             {
                 newlineflag = 1;
                 break;
@@ -269,7 +269,7 @@ void *thread_function(void *threadparams)
         if (newlineflag)
         {
             // Flushing contents of temp buffer to file
-            write_to_file(temp_buffer, temp_buffer_writehead);
+            write_to_file(receive_buffer, temp_buffer_writehead);
             // Resetting the writehead
             temp_buffer_writehead = 0;
 
@@ -280,7 +280,7 @@ void *thread_function(void *threadparams)
         else
         {
             // When there's no new line, increasing the size of temp buffer
-            temp_buffer = (char *)realloc(temp_buffer,
+            receive_buffer = (char *)realloc(receive_buffer,
                                           ((size_t)(temp_buffer_size + TEMP_BUFFER)) *
                                               sizeof(char));
 
@@ -292,7 +292,7 @@ void *thread_function(void *threadparams)
 end:
     // Clean up, set flag and exit
     free(receive_buffer);
-    free(temp_buffer);
+    // free(temp_buffer);
     close(data->conn_fd);
     data->thread_complete_flag = 1;
     return NULL;
