@@ -50,6 +50,8 @@ struct globals_aesdsocket
     int sockfd;
     int filefd;
     int file_writehead;
+    int exit_flag;
+    int write_flag;
     thread_data head;
     pthread_mutex_t file_mutex;
 } aesdsocket;
@@ -67,7 +69,6 @@ static void send_file();
 static void write_timestamp();
 static void start_timer();
 void *thread_function(void *threadparams);
-// static void create_head_element();
 
 // ---------------------------------main--------------------------------------------
 
@@ -94,6 +95,29 @@ int main(int argc, char *argv[])
 
     while (1)
     {
+        if (aesdsocket.write_flag)
+        {
+            write_timestamp();
+            aesdsocket.write_flag = 0;
+        }
+
+        if (aesdsocket.exit_flag)
+        {
+            close(aesdsocket.filefd);
+            unlink("/var/tmp/aesdsocketdata");
+
+            thread_data *datap;
+            while (!SLIST_EMPTY(&head))
+            {
+                datap = SLIST_FIRST(&head);
+                pthread_join(datap->threadID, NULL);
+                // printf("Read2: %d\n", datap->conn_fd);
+                SLIST_REMOVE_HEAD(&head, entries);
+                free(datap);
+            }
+
+            exit(EXIT_SUCCESS);
+        }
         accept_connections_loop(&head);
     }
     return 0;
@@ -154,8 +178,7 @@ static void accept_connections_loop(struct slisthead *head)
         thread_data *test;
         thread_data *temp;
 
-    
-        SLIST_FOREACH_SAFE(test, head, entries,temp)
+        SLIST_FOREACH_SAFE(test, head, entries, temp)
         {
             if (test->thread_complete_flag)
             {
@@ -194,8 +217,6 @@ void *thread_function(void *threadparams)
     temp_buffer_writehead = 0;
     temp_buffer_size = TEMP_BUFFER;
 
-    printf("SUCCESS\n");
-
     while (1)
     {
 
@@ -206,7 +227,6 @@ void *thread_function(void *threadparams)
 
         if (bytes_received == 0)
         {
-            printf("Closing the connection \n");
             close(data->conn_fd);
             break;
         }
@@ -245,8 +265,7 @@ void *thread_function(void *threadparams)
     free(receive_buffer);
     free(temp_buffer);
     close(data->conn_fd);
-
-    data->thread_complete_flag = 1;    
+    data->thread_complete_flag = 1;
     return NULL;
 }
 
@@ -331,14 +350,12 @@ void sig_handler(int signo)
 {
     if (signo == SIGALRM)
     {
-        write_timestamp();
+        aesdsocket.write_flag = 1;
     }
 
     if (signo == SIGINT || signo == SIGTERM)
     {
-        close(aesdsocket.sockfd);
-        unlink("/var/tmp/aesdsocketdata");
-        exit(EXIT_SUCCESS);
+        aesdsocket.exit_flag = 1;
     }
 }
 
@@ -404,7 +421,8 @@ static void bind_to_port(char *port)
         exit(1);
     }
 
-    // fcntl(aesdsocket.sockfd, F_SETFL, O_NONBLOCK);
+    // Tells the kernel to make the socket nonblocking
+    fcntl(aesdsocket.sockfd, F_SETFL, O_NONBLOCK);
 
     printf("SUCCESS\n");
 
