@@ -305,9 +305,6 @@ end:
 // ---------------------------------send_file--------------------------------------------
 static void send_file(int conn_fd)
 {
-    // Allocate and initialize the send buffer
-    // TODO, this allocation can be moved
-
     // Go to the beginning of the file
     if (lseek(aesdsocket.filefd, 0, SEEK_SET) == -1)
     {
