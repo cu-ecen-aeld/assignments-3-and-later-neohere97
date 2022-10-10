@@ -30,9 +30,8 @@
 
 //-----------------------Global--Defines-----------------------------
 #define BACKLOG (10)
-#define RECEIVE_BUFFER (1024)
 #define SEND_BUFFER (1024)
-#define TEMP_BUFFER (1024)
+#define RECEIVE_BUFFER (1024)
 
 //--------------------Globals-Struct---------------------------------------
 
@@ -53,7 +52,6 @@ struct globals_aesdsocket
     int exit_flag;
     int write_flag;
     char *send_buffer;
-    char *receive_buffer;
     thread_data head;
     pthread_mutex_t file_mutex;
 } aesdsocket;
@@ -71,12 +69,15 @@ static void write_to_file();
 static void send_file();
 static void write_timestamp();
 static void start_timer();
+static void setup_send_buffer();
+static void cleanup(struct slisthead *head);
+static void join_cleanup_threads(struct slisthead *head);
 void *thread_function(void *threadparams);
-static void setup_buffers();
 
-// ---------------------------------main--------------------------------------------
-static void setup_buffers()
+// ---------------------------------setup_send_buffer--------------------------------------------
+static void setup_send_buffer()
 {
+    // Setup the send buffer which is used to send data back
     aesdsocket.send_buffer = (char *)calloc((size_t)SEND_BUFFER, sizeof(char));
     if (aesdsocket.send_buffer == NULL)
     {
@@ -84,6 +85,8 @@ static void setup_buffers()
         exit(EXIT_FAILURE);
     }
 }
+// ---------------------------------main--------------------------------------------
+
 int main(int argc, char *argv[])
 {
     // Init Logging
@@ -93,7 +96,7 @@ int main(int argc, char *argv[])
 
     bind_to_port("9000");
 
-    setup_buffers();
+    setup_send_buffer();
 
     pthread_mutex_init(&aesdsocket.file_mutex, NULL);
 
@@ -117,29 +120,42 @@ int main(int argc, char *argv[])
 
         if (aesdsocket.exit_flag)
         {
-            close(aesdsocket.filefd);
-            unlink("/var/tmp/aesdsocketdata");
-            free(aesdsocket.send_buffer);
-
-            thread_data *datap;
-            while (!SLIST_EMPTY(&head))
-            {
-                datap = SLIST_FIRST(&head);
-                pthread_join(datap->threadID, NULL);
-                // printf("Read2: %d\n", datap->conn_fd);
-                SLIST_REMOVE_HEAD(&head, entries);
-                free(datap);
-            }
-
-            exit(EXIT_SUCCESS);
+            cleanup(&head);
         }
+
+        join_cleanup_threads(&head);
         accept_connections_loop(&head);
     }
     return 0;
 }
+// ---------------------------------join_cleanup_threads--------------------------------------------
+
+static void join_cleanup_threads(struct slisthead *head)
+{
+    thread_data *thread, *temp;
+
+    // Going through all the threads and joining the ones which have finished
+    SLIST_FOREACH_SAFE(thread, head, entries, temp)
+    {
+        if (thread->thread_complete_flag)
+        {
+            pthread_join(thread->threadID, NULL);
+            SLIST_REMOVE(head, thread, thread_data, entries);
+            free(thread);
+        }
+    }
+}
+// ---------------------------------cleanup--------------------------------------------
+static void cleanup(struct slisthead *head)
+{
+    // closing socket, removing file and freeing buffer
+    close(aesdsocket.filefd);
+    unlink("/var/tmp/aesdsocketdata");
+    free(aesdsocket.send_buffer);
+    exit(EXIT_SUCCESS);
+}
 
 // ---------------------------------write_timestamp--------------------------------------------
-
 static void write_timestamp()
 {
     time_t timer;
@@ -158,7 +174,6 @@ static void write_timestamp()
 // ---------------------------------accept_connections_loop--------------------------------------------
 static void accept_connections_loop(struct slisthead *head)
 {
-
     struct sockaddr_storage test_addr;
     socklen_t addr_size;
     addr_size = sizeof(test_addr);
@@ -174,7 +189,7 @@ static void accept_connections_loop(struct slisthead *head)
         else
         {
             perror("accept():");
-            exit(EXIT_FAILURE);
+            aesdsocket.exit_flag = 1;
         }
     }
     else
@@ -198,31 +213,21 @@ static void accept_connections_loop(struct slisthead *head)
             perror("pthread_create():");
         }
 
-        // Going through all the threads and joining the ones which have finished
-        thread_data *thread, *temp;
-
-        SLIST_FOREACH_SAFE(thread, head, entries, temp)
-        {
-            if (thread->thread_complete_flag)
-            {
-                pthread_join(thread->threadID, NULL);
-                SLIST_REMOVE(head, thread, thread_data, entries);
-                free(thread);
-            }
-        }
+        
     }
 }
-// ---------------------------------thread_function--------------------------------------------
 
+// ---------------------------------thread_function--------------------------------------------
 void *thread_function(void *threadparams)
 {
     thread_data *data = (thread_data *)threadparams;
 
     int bytes_received, newlineflag = 0;
     char *receive_buffer;
-    // The below two variables track the total size of temp buffer as it gets reallocated
+
+    // The below two variables track the total size of receive buffer as it gets reallocated
     // writehead also tracks the current capacity/where to write next
-    int temp_buffer_writehead, temp_buffer_size;
+    int receive_buffer_writehead, receive_buffer_size;
 
     // Allocating and Initializing the receive buffer
     receive_buffer = (char *)calloc((size_t)RECEIVE_BUFFER, sizeof(char));
@@ -232,22 +237,14 @@ void *thread_function(void *threadparams)
         exit(EXIT_FAILURE);
     }
 
-    // Allocating and Initializing the temp buffer
-    // temp_buffer = (char *)calloc((size_t)TEMP_BUFFER, sizeof(char));
-    // if (temp_buffer == NULL)
-    // {
-    //     printf("Error allocating memeroy for temp buffer \n");
-    //     exit(EXIT_FAILURE);
-    // }
-
-    // Initializing the temp buffer trackers
-    temp_buffer_writehead = 0;
-    temp_buffer_size = TEMP_BUFFER;
+    // Initializing the receive buffer trackers
+    receive_buffer_writehead = 0;
+    receive_buffer_size = RECEIVE_BUFFER;
 
     while (1)
     {
 
-        bytes_received = recv(data->conn_fd, &(receive_buffer[temp_buffer_writehead]), RECEIVE_BUFFER, 0);
+        bytes_received = recv(data->conn_fd, &(receive_buffer[receive_buffer_writehead]), RECEIVE_BUFFER, 0);
 
         if (bytes_received == -1)
         {
@@ -261,15 +258,11 @@ void *thread_function(void *threadparams)
             break;
         }
 
-        // This copies the data from the receive buffer of fixed size to
-        // variable size temp buffer. There by keeping the receive buffer clean
-        // memcpy(&temp_buffer[temp_buffer_writehead], receive_buffer, bytes_received);
-        // Updating the buffer writehead after data is copied
-        temp_buffer_writehead += bytes_received;
+        receive_buffer_writehead += bytes_received;
 
         // Find the location of the newline character in the buffer
         int i;
-        for (i = 0; i < temp_buffer_writehead; i++)
+        for (i = 0; i < receive_buffer_writehead; i++)
         {
             if (receive_buffer[i] == '\n')
             {
@@ -280,10 +273,10 @@ void *thread_function(void *threadparams)
 
         if (newlineflag)
         {
-            // Flushing contents of temp buffer to file
-            write_to_file(receive_buffer, temp_buffer_writehead);
+            // Flushing contents of receive buffer to file
+            write_to_file(receive_buffer, receive_buffer_writehead);
             // Resetting the writehead
-            temp_buffer_writehead = 0;
+            receive_buffer_writehead = 0;
 
             // Send the contents of the file
             send_file(data->conn_fd);
@@ -291,20 +284,19 @@ void *thread_function(void *threadparams)
         }
         else
         {
-            // When there's no new line, increasing the size of temp buffer
+            // When there's no new line, increasing the size of receive buffer
             receive_buffer = (char *)realloc(receive_buffer,
-                                             ((size_t)(temp_buffer_size + TEMP_BUFFER)) *
+                                             ((size_t)(receive_buffer_size + RECEIVE_BUFFER)) *
                                                  sizeof(char));
 
-            // Updating the size of temp buffer
-            temp_buffer_size += TEMP_BUFFER;
+            // Updating the size of receive buffer
+            receive_buffer_size += RECEIVE_BUFFER;
         }
     }
 
 end:
     // Clean up, set flag and exit
     free(receive_buffer);
-    // free(temp_buffer);
     close(data->conn_fd);
     data->thread_complete_flag = 1;
     return NULL;
@@ -363,7 +355,7 @@ static void write_to_file(char *buffer, int buffer_size)
               (size_t)buffer_size) != buffer_size)
     {
         printf("ERR! write didn't write everything \n");
-        exit(EXIT_FAILURE);
+        aesdsocket.exit_flag = 1;
     }
 
     aesdsocket.file_writehead += buffer_size;
@@ -381,7 +373,7 @@ static void open_temp_file(char *file)
     if (aesdsocket.filefd == -1)
     {
         syslog(LOG_ERR, "Error opening file with error: %d", errno);
-        exit(EXIT_FAILURE);
+        aesdsocket.exit_flag = 1;
     }
 
     aesdsocket.file_writehead = 0;
@@ -391,15 +383,10 @@ static void open_temp_file(char *file)
 void sig_handler(int signo)
 {
     if (signo == SIGALRM)
-    {
-
         aesdsocket.write_flag = 1;
-    }
 
     if (signo == SIGINT || signo == SIGTERM)
-    {
         aesdsocket.exit_flag = 1;
-    }
 }
 
 // -----------------------------------daemonify---------------------------------------------
@@ -415,15 +402,15 @@ static void daemonify(int argc, char *argv[])
             pid = fork();
 
             if (pid == -1)
-                exit(EXIT_FAILURE);
+                aesdsocket.exit_flag = 1;
             else if (pid != 0)
                 exit(EXIT_SUCCESS);
 
             if (setsid() == -1)
-                exit(EXIT_FAILURE);
+                aesdsocket.exit_flag = 1;
 
             if (chdir("/") == -1)
-                exit(EXIT_FAILURE);
+                aesdsocket.exit_flag = 1;
 
             open("/dev/null", O_RDWR);
             dup(0);
@@ -515,7 +502,7 @@ static void register_signal_handlers()
     if (sigaction(SIGINT, &act, NULL) == -1)
     {
         perror("sigaction");
-        exit(EXIT_FAILURE);
+        aesdsocket.exit_flag = 1;
     }
     printf("SUCCESS\n");
 
@@ -523,7 +510,7 @@ static void register_signal_handlers()
     if (sigaction(SIGTERM, &act, NULL) == -1)
     {
         perror("sigaction");
-        exit(EXIT_FAILURE);
+        aesdsocket.exit_flag = 1;
     }
     printf("SUCCESS\n");
 
@@ -531,7 +518,7 @@ static void register_signal_handlers()
     if (sigaction(SIGALRM, &act, NULL) == -1)
     {
         perror("sigaction");
-        exit(EXIT_FAILURE);
+        aesdsocket.exit_flag = 1;
     }
     printf("SUCCESS\n");
 }
