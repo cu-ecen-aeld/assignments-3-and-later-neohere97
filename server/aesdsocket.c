@@ -1,5 +1,5 @@
 //  /***************************************************************************
-//   * AESD Assignment 5
+//   * AESD Assignment 6
 //   * Author: Chinmay Shalawadi
 //   * Institution: University of Colorado Boulder
 //   * Mail id: chsh1552@colorado.edu
@@ -28,13 +28,13 @@
 #include <stdint.h>
 #include <pthread.h>
 
-//-----------------------Global--Defines-----------------------------
+//-----------------------Global--Defines----------------------------------
 #define BACKLOG (10)
 #define SEND_BUFFER (1024)
 #define RECEIVE_BUFFER (1024)
 
-//--------------------Globals-Struct---------------------------------------
 
+//----------------Thread data structure------------------------------------------
 typedef struct thread_data
 {
     pthread_t threadID;
@@ -43,7 +43,7 @@ typedef struct thread_data
     SLIST_ENTRY(thread_data)
     entries;
 } thread_data;
-
+//--------------------Globals-Struct---------------------------------------------
 struct globals_aesdsocket
 {
     int sockfd;
@@ -59,7 +59,7 @@ struct globals_aesdsocket
 // Defining a struct with name slisthead
 SLIST_HEAD(slisthead, thread_data);
 
-//--------------------Function Declarations--------------------------------
+//--------------------Function Declarations---------------------------------------
 static void register_signal_handlers();
 static void bind_to_port(char *port);
 static void open_temp_file(char *file);
@@ -74,19 +74,9 @@ static void cleanup(struct slisthead *head);
 static void join_threads(struct slisthead *head);
 void *thread_function(void *threadparams);
 
-// ---------------------------------setup_send_buffer--------------------------------------------
-static void setup_send_buffer()
-{
-    // Setup the send buffer which is used to send data back
-    aesdsocket.send_buffer = (char *)calloc((size_t)SEND_BUFFER, sizeof(char));
-    if (aesdsocket.send_buffer == NULL)
-    {
-        printf("Error allocating memeroy for send buffer \n");
-        exit(EXIT_FAILURE);
-    }
-}
-// ---------------------------------main--------------------------------------------
 
+//Function Code
+// ---------------------------------main------------------------------------------
 int main(int argc, char *argv[])
 {
     // Init Logging
@@ -128,50 +118,7 @@ int main(int argc, char *argv[])
     }
     return 0;
 }
-// ---------------------------------join_threads--------------------------------------------
-
-static void join_threads(struct slisthead *head)
-{
-    thread_data *thread, *temp;
-
-    // Going through all the threads and joining the ones which have finished
-    SLIST_FOREACH_SAFE(thread, head, entries, temp)
-    {
-        if (thread->thread_complete_flag)
-        {
-            pthread_join(thread->threadID, NULL);
-            SLIST_REMOVE(head, thread, thread_data, entries);
-            free(thread);
-        }
-    }
-}
-// ---------------------------------cleanup--------------------------------------------
-static void cleanup(struct slisthead *head)
-{
-    // closing socket, removing file and freeing buffer
-    close(aesdsocket.filefd);
-    unlink("/var/tmp/aesdsocketdata");
-    free(aesdsocket.send_buffer);
-    exit(EXIT_SUCCESS);
-}
-
-// ---------------------------------write_timestamp--------------------------------------------
-static void write_timestamp()
-{
-    time_t timer;
-    char buffer[26], finalString[40];
-    struct tm *tm_info;
-
-    timer = time(NULL);
-    tm_info = localtime(&timer);
-
-    strftime(buffer, 26, "%a, %d %b %Y %T %z", tm_info);
-    sprintf(finalString, "timestamp:%s\n", buffer);
-
-    write_to_file(finalString, strlen(finalString));
-}
-
-// ---------------------------------accept_connections_loop--------------------------------------------
+// ---------------------------------accept_connections_loop-----------------------
 static void accept_connections_loop(struct slisthead *head)
 {
     struct sockaddr_storage test_addr;
@@ -216,8 +163,7 @@ static void accept_connections_loop(struct slisthead *head)
         
     }
 }
-
-// ---------------------------------thread_function--------------------------------------------
+// ---------------------------------thread_function-------------------------------
 void *thread_function(void *threadparams)
 {
     thread_data *data = (thread_data *)threadparams;
@@ -301,8 +247,58 @@ end:
     data->thread_complete_flag = 1;
     return NULL;
 }
+// ---------------------------------setup_send_buffer-----------------------------
+static void setup_send_buffer()
+{
+    // Setup the send buffer which is used to send data back
+    aesdsocket.send_buffer = (char *)calloc((size_t)SEND_BUFFER, sizeof(char));
+    if (aesdsocket.send_buffer == NULL)
+    {
+        printf("Error allocating memeroy for send buffer \n");
+        exit(EXIT_FAILURE);
+    }
+}
+// ---------------------------------join_threads----------------------------------
+static void join_threads(struct slisthead *head)
+{
+    thread_data *thread, *temp;
 
-// ---------------------------------send_file--------------------------------------------
+    // Going through all the threads and joining the ones which have finished
+    SLIST_FOREACH_SAFE(thread, head, entries, temp)
+    {
+        if (thread->thread_complete_flag)
+        {
+            pthread_join(thread->threadID, NULL);
+            SLIST_REMOVE(head, thread, thread_data, entries);
+            free(thread);
+        }
+    }
+}
+// ---------------------------------cleanup---------------------------------------
+static void cleanup(struct slisthead *head)
+{
+    // closing socket, removing file and freeing buffer
+    close(aesdsocket.filefd);
+    unlink("/var/tmp/aesdsocketdata");
+    free(aesdsocket.send_buffer);
+    exit(EXIT_SUCCESS);
+}
+// ---------------------------------write_timestamp-------------------------------
+static void write_timestamp()
+{
+    time_t timer;
+    char buffer[26], finalString[40];
+    struct tm *tm_info;
+
+    timer = time(NULL);
+    tm_info = localtime(&timer);
+
+    strftime(buffer, 26, "%a, %d %b %Y %T %z", tm_info);
+    sprintf(finalString, "timestamp:%s\n", buffer);
+
+    write_to_file(finalString, strlen(finalString));
+}
+// ---------------------------------send_file-------------------------------------
 static void send_file(int conn_fd)
 {
     // Go to the beginning of the file
@@ -341,8 +337,7 @@ static void send_file(int conn_fd)
         current_filehead -= chunk;
     }
 }
-
-// ---------------------------------write_to_file--------------------------------------------
+// ---------------------------------write_to_file---------------------------------
 static void write_to_file(char *buffer, int buffer_size)
 {
     // Write to file with mutex protection
@@ -358,8 +353,7 @@ static void write_to_file(char *buffer, int buffer_size)
     aesdsocket.file_writehead += buffer_size;
     pthread_mutex_unlock(&aesdsocket.file_mutex);
 }
-
-// ---------------------------------open_temp_file--------------------------------------------
+// ---------------------------------open_temp_file--------------------------------
 static void open_temp_file(char *file)
 {
     printf("Opening file:%s:", file);
@@ -376,7 +370,7 @@ static void open_temp_file(char *file)
     aesdsocket.file_writehead = 0;
     printf("SUCCESS\n");
 }
-// ---------------------------------sig_handler--------------------------------------------
+// ---------------------------------sig_handler-----------------------------------
 void sig_handler(int signo)
 {
     if (signo == SIGALRM)
@@ -385,8 +379,7 @@ void sig_handler(int signo)
     if (signo == SIGINT || signo == SIGTERM)
         aesdsocket.exit_flag = 1;
 }
-
-// -----------------------------------daemonify---------------------------------------------
+// -----------------------------------daemonify-----------------------------------
 static void daemonify(int argc, char *argv[])
 {
 
@@ -416,8 +409,7 @@ static void daemonify(int argc, char *argv[])
         printf("Attempting to become a Daemon:SUCCESS\n");
     }
 }
-
-// -----------------------------bind_to_port----------------------------------------
+// -----------------------------bind_to_port--------------------------------------
 static void bind_to_port(char *port)
 {
     int status, yes = 1;
@@ -482,8 +474,7 @@ static void bind_to_port(char *port)
     }
     printf("SUCCESS\n");
 }
-
-// --------------------------register_signal_handlers------------------------------------------
+// --------------------------register_signal_handlers-----------------------------
 static void register_signal_handlers()
 {
 
@@ -519,7 +510,6 @@ static void register_signal_handlers()
     }
     printf("SUCCESS\n");
 }
-
 // --------------------------start_timer------------------------------------------
 static void start_timer()
 {
@@ -536,4 +526,4 @@ static void start_timer()
         return;
     }
 }
-// ---------------------------------End--------------------------------------------
+// ---------------------------------End-------------------------------------------
