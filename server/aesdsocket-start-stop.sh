@@ -3,6 +3,8 @@
 case "$1" in
     start)
         echo "Starting simpelserver"
+        /etc/init.d/init.sh start
+        /etc/init.d/misc-modules-start-stop.sh start
         start-stop-daemon -S -n aesdsocket -a /usr/bin/aesdsocket
         ;;
     stop)
