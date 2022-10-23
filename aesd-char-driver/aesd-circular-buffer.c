@@ -34,14 +34,15 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 {
     int size = 0;
     int i, j;
+    int buffer_index;
+    int num_elements;
 
     // When buffer is empty send null
     if (!buffer->full && (buffer->in_offs == buffer->out_offs))
         return NULL;
 
     // Making a copy of beginning of buffer index
-    int buffer_index = buffer->out_offs;
-    int num_elements;
+    buffer_index = buffer->out_offs;
 
     // Calculate number of elements present in the buffeer
     if (buffer->full)
@@ -52,13 +53,15 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
     // Iterate over elements
     for (i = 0; i < num_elements; i++)
     {
+
         // Iterate over characters
-        for (j = 0; j < strlen((buffer->entry[buffer_index]).buffptr); j++)
+        for (j = 0; j < (buffer->entry[buffer_index]).size; j++)
         {
             if (size == char_offset)
             {
                 // When offset is found return the pointer
                 *entry_offset_byte_rtn = j;
+                printk("entry offsetj -> %d, buffer_index -> %d, size-> %d, char_offset-> %ld, strlen -> %ld, string -> %s", j, buffer_index, size, char_offset,strlen((buffer->entry[buffer_index]).buffptr),(buffer->entry[buffer_index]).buffptr);
                 return &(buffer->entry[buffer_index]);
             }
             else
@@ -89,7 +92,7 @@ char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const 
     retval = NULL;
 
     if (buffer->full)
-        retval = buffer->entry[buffer->out_offs].buffptr;
+        retval = (char *)buffer->entry[buffer->out_offs].buffptr;
     // Adds the entry at in_offs position
     (buffer->entry[buffer->in_offs]).buffptr = add_entry->buffptr;
     (buffer->entry[buffer->in_offs]).size = add_entry->size;
@@ -114,6 +117,14 @@ char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const 
     {
         buffer->full = true;
     }
+
+    printk("inoffs -> %d, outoffs->%d", buffer->in_offs, buffer->out_offs);
+    // uint8_t index;
+    // struct aesd_buffer_entry *entry2;
+    // AESD_CIRCULAR_BUFFER_FOREACH(entry2, buffer, index)
+    // {
+    //     printk("elem %d: %s \n", index, entry2->buffptr);
+    // }
 
     return retval;
 }

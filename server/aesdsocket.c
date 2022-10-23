@@ -320,7 +320,7 @@ static void write_timestamp()
 static void send_file(int conn_fd)
 {
 #ifdef KERNEL_KERNEL
-    open_temp_file("/dev/aesdchar");
+    // open_temp_file("/dev/aesdchar");
 #endif
 
 // Go to the beginning of the file
@@ -335,10 +335,12 @@ static void send_file(int conn_fd)
     int chunk = SEND_BUFFER;
     // File writehead tracks total data on the file
     int current_filehead = aesdsocket.file_writehead;
+    int read_data;
 
     // Send data in max size of SEND_BUFFER Chunks
     while (current_filehead > 0)
     {
+        printf("current writehead is %d \n", current_filehead);
         if (current_filehead < SEND_BUFFER)
             chunk = current_filehead;
 
@@ -348,27 +350,28 @@ static void send_file(int conn_fd)
         pthread_mutex_lock(&aesdsocket.file_mutex);
 #endif
         // Read only the chunk size, and file descriptor updates
-        if (read(aesdsocket.filefd, aesdsocket.send_buffer, chunk) == -1)
+        read_data = read(aesdsocket.filefd, aesdsocket.send_buffer, chunk);
+        if (read_data == -1)
         {
             perror("read():");
         }
+        printf("data read is %d \n", read_data);
 #ifndef KERNEL_KERNEL
         pthread_mutex_unlock(&aesdsocket.file_mutex);
 #endif
 
         // Send data which was read into the buffer
-        if (send(conn_fd, aesdsocket.send_buffer, chunk, 0) == -1)
+        if (send(conn_fd, aesdsocket.send_buffer, read_data, 0) == -1)
         {
             perror("send():");
         }
 
         // Updating remaining data to be sent
-        current_filehead -= chunk;
-
-#ifdef KERNEL_KERNEL
-        close(aesdsocket.filefd);
-#endif
+        current_filehead -= read_data;
     }
+#ifdef KERNEL_KERNEL
+    close(aesdsocket.filefd);
+#endif
 }
 // ---------------------------------write_to_file---------------------------------
 static void write_to_file(char *buffer, int buffer_size)
@@ -380,19 +383,21 @@ static void write_to_file(char *buffer, int buffer_size)
 #endif
 
     // Write to file with mutex protection
+    int data_written = write(aesdsocket.filefd,
+                             buffer,
+                             (size_t)buffer_size);
 
-    if (write(aesdsocket.filefd,
-              buffer,
-              (size_t)buffer_size) != buffer_size)
+    if (data_written != buffer_size)
     {
-        printf("ERR! write didn't write everything \n");
+        printf("ERR! write didn't write everything %d\n", data_written);
+        perror("write():");
         aesdsocket.exit_flag = 1;
     }
 
     aesdsocket.file_writehead += buffer_size;
 
 #ifdef KERNEL_KERNEL
-    close(aesdsocket.filefd);
+    // close(aesdsocket.filefd);
 #else
     pthread_mutex_unlock(&aesdsocket.file_mutex);
 #endif
@@ -411,8 +416,8 @@ static void open_temp_file(char *file)
         aesdsocket.exit_flag = 1;
     }
 
-    aesdsocket.file_writehead = 0;
-    printf("SUCCESS\n");
+    // aesdsocket.file_writehead = 0;
+    printf("SUCCESS fd-> %d\n", aesdsocket.filefd);
 }
 // ---------------------------------sig_handler-----------------------------------
 void sig_handler(int signo)

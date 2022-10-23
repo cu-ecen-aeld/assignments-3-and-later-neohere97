@@ -54,17 +54,45 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
                   loff_t *f_pos)
 {
     ssize_t retval = 0;
-    // size_t *entry_offset;
-    // struct aesd_buffer_entry *entry;    
+    size_t entry_offset;
+    int buff_count = 0;
+    struct aesd_dev *dev_strcut = (struct aesd_dev *)filp->private_data;
+    struct aesd_buffer_entry *entry;
     PDEBUG("read %zu bytes with offset %lld", count, *f_pos);
 
-    // entry = aesd_circular_buffer_find_entry_offset_for_fpos
+    mutex_lock(&(dev_strcut->lock));
+    entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev_strcut->data_buffer, *f_pos, &entry_offset);
+    mutex_unlock(&(dev_strcut->lock));
 
-    // if (copy_to_user(buf, p, count))
-    // {
-    //     retval = -EFAULT;
-    // }
-    return count;
+    if (entry == NULL)
+    {
+        printk(KERN_ALERT "NULLLLLL \n");
+        *f_pos = 0;
+        goto end;
+    }
+
+    if ((entry->size - entry_offset) < count)
+    {
+        printk("entry offset -> %ld, size-> %ld", entry_offset, entry->size);
+        *f_pos += (entry->size - entry_offset);
+        buff_count = entry->size - entry_offset;
+    }
+    else
+    {
+        *f_pos += count;
+        buff_count = count;
+    }
+
+    if (copy_to_user(buf, entry->buffptr + entry_offset, buff_count))
+    {
+        retval = -EFAULT;
+        goto end;
+    }
+
+    printk("buff_count %d \n", buff_count);
+    retval = buff_count;
+end:
+    return retval;
 }
 
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
@@ -74,7 +102,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     char *ker_buff, *potentially_free_memory;
     struct aesd_buffer_entry entry;
     struct aesd_dev *buffer = (struct aesd_dev *)filp->private_data;
-    int newlineflag = 0;
+    int newlineflag = 0, i;
 
     PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
 
@@ -86,7 +114,6 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         goto err;
     }
 
-    int i;
     for (i = 0; i < count; i++)
     {
         if (ker_buff[i] == '\n')
@@ -99,7 +126,6 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     if (!buffer->global_buffer_size)
     {
         buffer->global_copy_buffer = kmalloc(count * sizeof(char), GFP_KERNEL);
-        printk(KERN_ALERT "memory allocated for global copy buffer \n");
     }
     else
     {
@@ -108,6 +134,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     }
 
     memcpy((buffer->global_copy_buffer) + (buffer->global_buffer_size), ker_buff, count * sizeof(char));
+    buffer->global_buffer_size += count;
 
     if (newlineflag)
     {
@@ -125,11 +152,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
         buffer->global_buffer_size = 0;
     }
-    else
-        buffer->global_buffer_size += count;
 
     kfree(ker_buff);
-
     return count;
 
 err:
@@ -195,6 +219,7 @@ void aesd_cleanup_module(void)
 
     cdev_del(&aesd_device.cdev);
 
+    mutex_destroy(&aesd_device.lock);
     /**
      * TODO: cleanup AESD specific poritions here as necessary
      */
