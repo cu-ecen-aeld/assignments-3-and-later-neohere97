@@ -61,7 +61,6 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
             {
                 // When offset is found return the pointer
                 *entry_offset_byte_rtn = j;
-                printk("entry offsetj -> %d, buffer_index -> %d, size-> %d, char_offset-> %ld, strlen -> %ld, string -> %s", j, buffer_index, size, char_offset,strlen((buffer->entry[buffer_index]).buffptr),(buffer->entry[buffer_index]).buffptr);
                 return &(buffer->entry[buffer_index]);
             }
             else
@@ -117,15 +116,6 @@ char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const 
     {
         buffer->full = true;
     }
-
-    printk("inoffs -> %d, outoffs->%d", buffer->in_offs, buffer->out_offs);
-    // uint8_t index;
-    // struct aesd_buffer_entry *entry2;
-    // AESD_CIRCULAR_BUFFER_FOREACH(entry2, buffer, index)
-    // {
-    //     printk("elem %d: %s \n", index, entry2->buffptr);
-    // }
-
     return retval;
 }
 
