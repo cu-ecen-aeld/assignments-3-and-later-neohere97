@@ -28,7 +28,8 @@
 #include <stdint.h>
 #include <pthread.h>
 
-#define KERNEL_KERNEL
+
+#define USE_AESD_CHAR_DEVICE 
 
 //-----------------------Global--Defines----------------------------------
 #define BACKLOG (10)
@@ -53,7 +54,7 @@ struct globals_aesdsocket
     int exit_flag;
     char *send_buffer;
     thread_data head;
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE 
     int write_flag;
     pthread_mutex_t file_mutex;
 #endif
@@ -76,7 +77,7 @@ static void cleanup(struct slisthead *head);
 static void join_threads(struct slisthead *head);
 void *thread_function(void *threadparams);
 
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE 
 static void write_timestamp();
 static void start_timer();
 #endif
@@ -94,17 +95,17 @@ int main(int argc, char *argv[])
 
     setup_send_buffer();
 
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE 
     pthread_mutex_init(&aesdsocket.file_mutex, NULL);
 #endif
 
     daemonify(argc, argv);
 
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE 
     open_temp_file("/var/tmp/aesdsocketdata");
 #endif
 
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE 
     start_timer();
 #endif
 
@@ -114,7 +115,7 @@ int main(int argc, char *argv[])
 
     while (1)
     {
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE 
         if (aesdsocket.write_flag)
         {
             write_timestamp();
@@ -291,7 +292,7 @@ static void cleanup(struct slisthead *head)
 {
     // closing socket, removing file and freeing buffer
 
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE 
     close(aesdsocket.filefd);
     unlink("/var/tmp/aesdsocketdata");
 #endif
@@ -300,7 +301,7 @@ static void cleanup(struct slisthead *head)
     exit(EXIT_SUCCESS);
 }
 // ---------------------------------write_timestamp-------------------------------
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE 
 static void write_timestamp()
 {
     time_t timer;
@@ -319,12 +320,12 @@ static void write_timestamp()
 // ---------------------------------send_file-------------------------------------
 static void send_file(int conn_fd)
 {
-#ifdef KERNEL_KERNEL
+#ifdef USE_AESD_CHAR_DEVICE 
     // open_temp_file("/dev/aesdchar");
 #endif
 
 // Go to the beginning of the file
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE 
     if (lseek(aesdsocket.filefd, 0, SEEK_SET) == -1)
     {
         perror("lseek():");
@@ -346,7 +347,7 @@ static void send_file(int conn_fd)
 
             // Locking the file_mutex
 
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE 
         pthread_mutex_lock(&aesdsocket.file_mutex);
 #endif
         // Read only the chunk size, and file descriptor updates
@@ -356,7 +357,7 @@ static void send_file(int conn_fd)
             perror("read():");
         }
         printf("data read is %d \n", read_data);
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE 
         pthread_mutex_unlock(&aesdsocket.file_mutex);
 #endif
 
@@ -369,14 +370,14 @@ static void send_file(int conn_fd)
         // Updating remaining data to be sent
         current_filehead -= read_data;
     }
-#ifdef KERNEL_KERNEL
+#ifdef USE_AESD_CHAR_DEVICE 
     close(aesdsocket.filefd);
 #endif
 }
 // ---------------------------------write_to_file---------------------------------
 static void write_to_file(char *buffer, int buffer_size)
 {
-#ifdef KERNEL_KERNEL
+#ifdef USE_AESD_CHAR_DEVICE 
     open_temp_file("/dev/aesdchar");
 #else
     pthread_mutex_lock(&aesdsocket.file_mutex);
@@ -396,7 +397,7 @@ static void write_to_file(char *buffer, int buffer_size)
 
     aesdsocket.file_writehead += buffer_size;
 
-#ifdef KERNEL_KERNEL
+#ifdef USE_AESD_CHAR_DEVICE 
     // close(aesdsocket.filefd);
 #else
     pthread_mutex_unlock(&aesdsocket.file_mutex);
@@ -422,7 +423,7 @@ static void open_temp_file(char *file)
 // ---------------------------------sig_handler-----------------------------------
 void sig_handler(int signo)
 {
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE 
     if (signo == SIGALRM)
         aesdsocket.write_flag = 1;
 #endif
@@ -554,7 +555,7 @@ static void register_signal_handlers()
     printf("SUCCESS\n");
 
     printf("Registering signal handler SIGALRM:");
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE
     if (sigaction(SIGALRM, &act, NULL) == -1)
     {
         perror("sigaction");
@@ -564,7 +565,7 @@ static void register_signal_handlers()
     printf("SUCCESS\n");
 }
 // --------------------------start_timer------------------------------------------
-#ifndef KERNEL_KERNEL
+#ifndef USE_AESD_CHAR_DEVICE
 static void start_timer()
 {
     struct itimerval delay;
