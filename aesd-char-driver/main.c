@@ -167,7 +167,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         // Lock the resource before addding entry
         mutex_lock(&(buffer->lock));
         potentially_free_memory = aesd_circular_buffer_add_entry(&(buffer->data_buffer), &entry);
-        mutex_unlock(&(buffer->lock));
+        
 
         // When pointer is returned from circular buffer, free it
         if (potentially_free_memory != NULL)
@@ -179,12 +179,11 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         // reset global buffer size
         buffer->global_buffer_size = 0;
     }
-
-    kfree(ker_buff);
-    return count;
+    retval = count;
 
 err:
     kfree(ker_buff);
+    mutex_unlock(&(buffer->lock));
     return retval;
 }
 struct file_operations aesd_fops = {
