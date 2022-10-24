@@ -99,14 +99,24 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
                    loff_t *f_pos)
 {
     ssize_t retval = -ENOMEM;
+
+    // Buffer Pointers for logic
     char *ker_buff, *potentially_free_memory;
     struct aesd_buffer_entry entry;
+
+    // Device struct from private data
     struct aesd_dev *buffer = (struct aesd_dev *)filp->private_data;
+
+    // Variables for write logic
     int newlineflag = 0, i;
 
     PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
 
+    // Allocating memory for copy buffer
     ker_buff = kmalloc(count * sizeof(char), GFP_KERNEL);
+
+    if (!ker_buff)
+        goto err;
 
     if (copy_from_user(ker_buff, buf, count))
     {
@@ -114,6 +124,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         goto err;
     }
 
+    // Find new line
     for (i = 0; i < count; i++)
     {
         if (ker_buff[i] == '\n')
@@ -123,33 +134,49 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         }
     }
 
+    // if there's no global buffer allocation
     if (!buffer->global_buffer_size)
     {
         buffer->global_copy_buffer = kmalloc(count * sizeof(char), GFP_KERNEL);
+        if (!buffer->global_copy_buffer)
+        {
+            goto err;
+        }
     }
     else
     {
+        // Extend the global buffer when there's new line
         buffer->global_copy_buffer = krealloc(buffer->global_copy_buffer, (count + buffer->global_buffer_size) * sizeof(char *), GFP_KERNEL);
+        if (!buffer->global_copy_buffer)
+        {
+            goto err;
+        }
         printk(KERN_ALERT "memory reallocated for global copy buffer \n");
     }
 
+    // copy contents from copy buffer to global buffer
     memcpy((buffer->global_copy_buffer) + (buffer->global_buffer_size), ker_buff, count * sizeof(char));
     buffer->global_buffer_size += count;
 
     if (newlineflag)
     {
+        // Fill out the new entry
         entry.buffptr = buffer->global_copy_buffer;
         entry.size = buffer->global_buffer_size;
+
+        // Lock the resource before addding entry
         mutex_lock(&(buffer->lock));
         potentially_free_memory = aesd_circular_buffer_add_entry(&(buffer->data_buffer), &entry);
         mutex_unlock(&(buffer->lock));
 
+        // When pointer is returned from circular buffer, free it
         if (potentially_free_memory != NULL)
         {
             kfree(potentially_free_memory);
             printk("Freed rolled over memory \n");
         }
 
+        // reset global buffer size
         buffer->global_buffer_size = 0;
     }
 
@@ -197,12 +224,11 @@ int aesd_init_module(void)
     }
     memset(&aesd_device, 0, sizeof(struct aesd_dev));
 
+    // Initialize Mutex
     mutex_init(&aesd_device.lock);
     /**
      * TODO: initialize the AESD specific portion of the device
      */
-
-    printk(KERN_ALERT "In the init function !!!!!!!!!!!!\n");
 
     result = aesd_setup_cdev(&aesd_device);
 
@@ -215,11 +241,23 @@ int aesd_init_module(void)
 
 void aesd_cleanup_module(void)
 {
+    // Variables to loop over the circular buffer
+    uint8_t index;
+    struct aesd_buffer_entry *entry;
+
     dev_t devno = MKDEV(aesd_major, aesd_minor);
 
     cdev_del(&aesd_device.cdev);
 
+    // Freeing Circular Buffer Memory
+    AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.data_buffer, index)
+    {
+        kfree(entry->buffptr);
+    }
+
+    // Destroy Mutex
     mutex_destroy(&aesd_device.lock);
+
     /**
      * TODO: cleanup AESD specific poritions here as necessary
      */
