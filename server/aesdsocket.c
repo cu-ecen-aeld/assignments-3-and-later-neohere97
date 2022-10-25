@@ -28,11 +28,13 @@
 #include <stdint.h>
 #include <pthread.h>
 
+
+#define USE_AESD_CHAR_DEVICE 
+
 //-----------------------Global--Defines----------------------------------
 #define BACKLOG (10)
 #define SEND_BUFFER (1024)
 #define RECEIVE_BUFFER (1024)
-
 
 //----------------Thread data structure------------------------------------------
 typedef struct thread_data
@@ -50,10 +52,13 @@ struct globals_aesdsocket
     int filefd;
     int file_writehead;
     int exit_flag;
-    int write_flag;
     char *send_buffer;
     thread_data head;
+#ifndef USE_AESD_CHAR_DEVICE 
+    int write_flag;
     pthread_mutex_t file_mutex;
+#endif
+
 } aesdsocket;
 
 // Defining a struct with name slisthead
@@ -67,16 +72,18 @@ static void daemonify(int argc, char *argv[]);
 static void accept_connections_loop(struct slisthead *head);
 static void write_to_file();
 static void send_file();
-static void write_timestamp();
-static void start_timer();
 static void setup_send_buffer();
 static void cleanup(struct slisthead *head);
 static void join_threads(struct slisthead *head);
 void *thread_function(void *threadparams);
 
+#ifndef USE_AESD_CHAR_DEVICE 
+static void write_timestamp();
+static void start_timer();
+#endif
 
-//Function Code
-// ---------------------------------main------------------------------------------
+// Function Code
+//  ---------------------------------main------------------------------------------
 int main(int argc, char *argv[])
 {
     // Init Logging
@@ -88,13 +95,19 @@ int main(int argc, char *argv[])
 
     setup_send_buffer();
 
+#ifndef USE_AESD_CHAR_DEVICE 
     pthread_mutex_init(&aesdsocket.file_mutex, NULL);
+#endif
 
     daemonify(argc, argv);
 
+#ifndef USE_AESD_CHAR_DEVICE 
     open_temp_file("/var/tmp/aesdsocketdata");
+#endif
 
+#ifndef USE_AESD_CHAR_DEVICE 
     start_timer();
+#endif
 
     struct slisthead head;
 
@@ -102,11 +115,13 @@ int main(int argc, char *argv[])
 
     while (1)
     {
+#ifndef USE_AESD_CHAR_DEVICE 
         if (aesdsocket.write_flag)
         {
             write_timestamp();
             aesdsocket.write_flag = 0;
         }
+#endif
 
         if (aesdsocket.exit_flag)
         {
@@ -159,8 +174,6 @@ static void accept_connections_loop(struct slisthead *head)
         {
             perror("pthread_create():");
         }
-
-        
     }
 }
 // ---------------------------------thread_function-------------------------------
@@ -278,12 +291,17 @@ static void join_threads(struct slisthead *head)
 static void cleanup(struct slisthead *head)
 {
     // closing socket, removing file and freeing buffer
+
+#ifndef USE_AESD_CHAR_DEVICE 
     close(aesdsocket.filefd);
     unlink("/var/tmp/aesdsocketdata");
+#endif
+
     free(aesdsocket.send_buffer);
     exit(EXIT_SUCCESS);
 }
 // ---------------------------------write_timestamp-------------------------------
+#ifndef USE_AESD_CHAR_DEVICE 
 static void write_timestamp()
 {
     time_t timer;
@@ -298,60 +316,92 @@ static void write_timestamp()
 
     write_to_file(finalString, strlen(finalString));
 }
+#endif
 // ---------------------------------send_file-------------------------------------
 static void send_file(int conn_fd)
 {
-    // Go to the beginning of the file
+#ifdef USE_AESD_CHAR_DEVICE 
+    // open_temp_file("/dev/aesdchar");
+#endif
+
+// Go to the beginning of the file
+#ifndef USE_AESD_CHAR_DEVICE 
     if (lseek(aesdsocket.filefd, 0, SEEK_SET) == -1)
     {
         perror("lseek():");
     }
+#endif
 
     // Setting the chunk size to default send buffer size
     int chunk = SEND_BUFFER;
     // File writehead tracks total data on the file
     int current_filehead = aesdsocket.file_writehead;
+    int read_data;
 
     // Send data in max size of SEND_BUFFER Chunks
     while (current_filehead > 0)
     {
+        printf("current writehead is %d \n", current_filehead);
         if (current_filehead < SEND_BUFFER)
             chunk = current_filehead;
 
-        // Locking the file_mutex
+            // Locking the file_mutex
+
+#ifndef USE_AESD_CHAR_DEVICE 
         pthread_mutex_lock(&aesdsocket.file_mutex);
+#endif
         // Read only the chunk size, and file descriptor updates
-        if (read(aesdsocket.filefd, aesdsocket.send_buffer, chunk) == -1)
+        read_data = read(aesdsocket.filefd, aesdsocket.send_buffer, chunk);
+        if (read_data == -1)
         {
             perror("read():");
         }
+        printf("data read is %d \n", read_data);
+#ifndef USE_AESD_CHAR_DEVICE 
         pthread_mutex_unlock(&aesdsocket.file_mutex);
+#endif
 
         // Send data which was read into the buffer
-        if (send(conn_fd, aesdsocket.send_buffer, chunk, 0) == -1)
+        if (send(conn_fd, aesdsocket.send_buffer, read_data, 0) == -1)
         {
             perror("send():");
         }
 
         // Updating remaining data to be sent
-        current_filehead -= chunk;
+        current_filehead -= read_data;
     }
+#ifdef USE_AESD_CHAR_DEVICE 
+    close(aesdsocket.filefd);
+#endif
 }
 // ---------------------------------write_to_file---------------------------------
 static void write_to_file(char *buffer, int buffer_size)
 {
-    // Write to file with mutex protection
+#ifdef USE_AESD_CHAR_DEVICE 
+    open_temp_file("/dev/aesdchar");
+#else
     pthread_mutex_lock(&aesdsocket.file_mutex);
-    if (write(aesdsocket.filefd,
-              buffer,
-              (size_t)buffer_size) != buffer_size)
+#endif
+
+    // Write to file with mutex protection
+    int data_written = write(aesdsocket.filefd,
+                             buffer,
+                             (size_t)buffer_size);
+
+    if (data_written != buffer_size)
     {
-        printf("ERR! write didn't write everything \n");
+        printf("ERR! write didn't write everything %d\n", data_written);
+        perror("write():");
         aesdsocket.exit_flag = 1;
     }
 
     aesdsocket.file_writehead += buffer_size;
+
+#ifdef USE_AESD_CHAR_DEVICE 
+    // close(aesdsocket.filefd);
+#else
     pthread_mutex_unlock(&aesdsocket.file_mutex);
+#endif
 }
 // ---------------------------------open_temp_file--------------------------------
 static void open_temp_file(char *file)
@@ -367,14 +417,16 @@ static void open_temp_file(char *file)
         aesdsocket.exit_flag = 1;
     }
 
-    aesdsocket.file_writehead = 0;
-    printf("SUCCESS\n");
+    // aesdsocket.file_writehead = 0;
+    printf("SUCCESS fd-> %d\n", aesdsocket.filefd);
 }
 // ---------------------------------sig_handler-----------------------------------
 void sig_handler(int signo)
 {
+#ifndef USE_AESD_CHAR_DEVICE 
     if (signo == SIGALRM)
         aesdsocket.write_flag = 1;
+#endif
 
     if (signo == SIGINT || signo == SIGTERM)
         aesdsocket.exit_flag = 1;
@@ -503,14 +555,17 @@ static void register_signal_handlers()
     printf("SUCCESS\n");
 
     printf("Registering signal handler SIGALRM:");
+#ifndef USE_AESD_CHAR_DEVICE
     if (sigaction(SIGALRM, &act, NULL) == -1)
     {
         perror("sigaction");
         aesdsocket.exit_flag = 1;
     }
+#endif
     printf("SUCCESS\n");
 }
 // --------------------------start_timer------------------------------------------
+#ifndef USE_AESD_CHAR_DEVICE
 static void start_timer()
 {
     struct itimerval delay;
@@ -526,4 +581,5 @@ static void start_timer()
         return;
     }
 }
+#endif
 // ---------------------------------End-------------------------------------------
