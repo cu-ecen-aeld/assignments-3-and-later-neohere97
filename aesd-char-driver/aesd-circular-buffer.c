@@ -95,7 +95,7 @@ char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const 
     // Adds the entry at in_offs position
     (buffer->entry[buffer->in_offs]).buffptr = add_entry->buffptr;
     (buffer->entry[buffer->in_offs]).size = add_entry->size;
-
+     buffer->total_buff_size += add_entry->size;
     // Updates in_offs and checks if it needs to rollback
     buffer->in_offs += 1;
 
@@ -104,11 +104,14 @@ char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const 
 
     if (buffer->full)
     {
+        
         // Update out_off and check if needs to rollback
         buffer->out_offs += 1;
 
         if (buffer->out_offs == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
             buffer->out_offs = 0;
+        
+        buffer->total_buff_size -= buffer->entry[buffer->in_offs].size;
     }
 
     // Mark the buffer as full when all elements are added

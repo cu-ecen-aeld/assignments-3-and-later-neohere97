@@ -27,9 +27,9 @@
 #include <signal.h>
 #include <stdint.h>
 #include <pthread.h>
+#include "aesd_ioctl.h"
 
-
-#define USE_AESD_CHAR_DEVICE 
+#define USE_AESD_CHAR_DEVICE
 
 //-----------------------Global--Defines----------------------------------
 #define BACKLOG (10)
@@ -54,7 +54,8 @@ struct globals_aesdsocket
     int exit_flag;
     char *send_buffer;
     thread_data head;
-#ifndef USE_AESD_CHAR_DEVICE 
+    const char *aesdioctl;
+#ifndef USE_AESD_CHAR_DEVICE
     int write_flag;
     pthread_mutex_t file_mutex;
 #endif
@@ -77,7 +78,7 @@ static void cleanup(struct slisthead *head);
 static void join_threads(struct slisthead *head);
 void *thread_function(void *threadparams);
 
-#ifndef USE_AESD_CHAR_DEVICE 
+#ifndef USE_AESD_CHAR_DEVICE
 static void write_timestamp();
 static void start_timer();
 #endif
@@ -95,17 +96,17 @@ int main(int argc, char *argv[])
 
     setup_send_buffer();
 
-#ifndef USE_AESD_CHAR_DEVICE 
+#ifndef USE_AESD_CHAR_DEVICE
     pthread_mutex_init(&aesdsocket.file_mutex, NULL);
 #endif
 
     daemonify(argc, argv);
 
-#ifndef USE_AESD_CHAR_DEVICE 
+#ifndef USE_AESD_CHAR_DEVICE
     open_temp_file("/var/tmp/aesdsocketdata");
 #endif
 
-#ifndef USE_AESD_CHAR_DEVICE 
+#ifndef USE_AESD_CHAR_DEVICE
     start_timer();
 #endif
 
@@ -113,9 +114,11 @@ int main(int argc, char *argv[])
 
     SLIST_INIT(&head);
 
+    aesdsocket.aesdioctl = "AESDCHAR_IOCSEEKTO:";
+
     while (1)
     {
-#ifndef USE_AESD_CHAR_DEVICE 
+#ifndef USE_AESD_CHAR_DEVICE
         if (aesdsocket.write_flag)
         {
             write_timestamp();
@@ -232,8 +235,13 @@ void *thread_function(void *threadparams)
 
         if (newlineflag)
         {
-            // Flushing contents of receive buffer to file
-            write_to_file(receive_buffer, receive_buffer_writehead);
+            if (strncmp(receive_buffer, aesdsocket.aesdioctl, strlen(aesdsocket.aesdioctl)) == 0)
+            {                              
+                write_to_file(receive_buffer, receive_buffer_writehead, 0);
+            }
+            else
+                // Flushing contents of receive buffer to file
+                write_to_file(receive_buffer, receive_buffer_writehead, 1);
             // Resetting the writehead
             receive_buffer_writehead = 0;
 
@@ -292,7 +300,7 @@ static void cleanup(struct slisthead *head)
 {
     // closing socket, removing file and freeing buffer
 
-#ifndef USE_AESD_CHAR_DEVICE 
+#ifndef USE_AESD_CHAR_DEVICE
     close(aesdsocket.filefd);
     unlink("/var/tmp/aesdsocketdata");
 #endif
@@ -301,7 +309,7 @@ static void cleanup(struct slisthead *head)
     exit(EXIT_SUCCESS);
 }
 // ---------------------------------write_timestamp-------------------------------
-#ifndef USE_AESD_CHAR_DEVICE 
+#ifndef USE_AESD_CHAR_DEVICE
 static void write_timestamp()
 {
     time_t timer;
@@ -320,12 +328,12 @@ static void write_timestamp()
 // ---------------------------------send_file-------------------------------------
 static void send_file(int conn_fd)
 {
-#ifdef USE_AESD_CHAR_DEVICE 
+#ifdef USE_AESD_CHAR_DEVICE
     // open_temp_file("/dev/aesdchar");
 #endif
 
 // Go to the beginning of the file
-#ifndef USE_AESD_CHAR_DEVICE 
+#ifndef USE_AESD_CHAR_DEVICE
     if (lseek(aesdsocket.filefd, 0, SEEK_SET) == -1)
     {
         perror("lseek():");
@@ -347,7 +355,7 @@ static void send_file(int conn_fd)
 
             // Locking the file_mutex
 
-#ifndef USE_AESD_CHAR_DEVICE 
+#ifndef USE_AESD_CHAR_DEVICE
         pthread_mutex_lock(&aesdsocket.file_mutex);
 #endif
         // Read only the chunk size, and file descriptor updates
@@ -357,7 +365,7 @@ static void send_file(int conn_fd)
             perror("read():");
         }
         printf("data read is %d \n", read_data);
-#ifndef USE_AESD_CHAR_DEVICE 
+#ifndef USE_AESD_CHAR_DEVICE
         pthread_mutex_unlock(&aesdsocket.file_mutex);
 #endif
 
@@ -370,34 +378,48 @@ static void send_file(int conn_fd)
         // Updating remaining data to be sent
         current_filehead -= read_data;
     }
-#ifdef USE_AESD_CHAR_DEVICE 
+#ifdef USE_AESD_CHAR_DEVICE
     close(aesdsocket.filefd);
 #endif
 }
 // ---------------------------------write_to_file---------------------------------
-static void write_to_file(char *buffer, int buffer_size)
+static void write_to_file(char *buffer, int buffer_size, int ioctl_num)
 {
-#ifdef USE_AESD_CHAR_DEVICE 
+#ifdef USE_AESD_CHAR_DEVICE
     open_temp_file("/dev/aesdchar");
 #else
     pthread_mutex_lock(&aesdsocket.file_mutex);
 #endif
 
-    // Write to file with mutex protection
-    int data_written = write(aesdsocket.filefd,
-                             buffer,
-                             (size_t)buffer_size);
-
-    if (data_written != buffer_size)
+    if (!ioctl_num)
     {
-        printf("ERR! write didn't write everything %d\n", data_written);
-        perror("write():");
-        aesdsocket.exit_flag = 1;
+        struct aesd_seekto seek_to;
+
+        sscanf(buffer, "AESDCHAR_IOCSEEKTO:%d,%d", &seek_to.write_cmd, &seek_to.write_cmd_offset);
+        printf("doing IOCTL %d,%d \n\r", seek_to.write_cmd, seek_to.write_cmd_offset);
+        if (ioctl(aesdsocket.filefd, AESDCHAR_IOCSEEKTO, &seek_to))
+        {
+            syslog(LOG_ERR, "Error in IOCTL, errno is %d\n", errno);
+        }
+    }
+    else
+    {
+        // Write to file with mutex protection
+        int data_written = write(aesdsocket.filefd,
+                                 buffer,
+                                 (size_t)buffer_size);
+
+        if (data_written != buffer_size)
+        {
+            printf("ERR! write didn't write everything %d\n", data_written);
+            perror("write():");
+            aesdsocket.exit_flag = 1;
+        }
+
+        aesdsocket.file_writehead += buffer_size;
     }
 
-    aesdsocket.file_writehead += buffer_size;
-
-#ifdef USE_AESD_CHAR_DEVICE 
+#ifdef USE_AESD_CHAR_DEVICE
     // close(aesdsocket.filefd);
 #else
     pthread_mutex_unlock(&aesdsocket.file_mutex);
@@ -423,7 +445,7 @@ static void open_temp_file(char *file)
 // ---------------------------------sig_handler-----------------------------------
 void sig_handler(int signo)
 {
-#ifndef USE_AESD_CHAR_DEVICE 
+#ifndef USE_AESD_CHAR_DEVICE
     if (signo == SIGALRM)
         aesdsocket.write_flag = 1;
 #endif
