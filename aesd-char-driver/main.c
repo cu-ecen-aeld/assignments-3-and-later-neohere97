@@ -201,13 +201,13 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
 
     mutex_lock(&aesd_device.lock);
 
-    // Check if valid write command
     if (write_cmd > (AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED - 1))
     {
         retval = -EINVAL;
         goto exit;
     }
 
+    // Check if offset is valid
     if (write_cmd_offset >= buffer->data_buffer.entry[write_cmd].size)
     {
         retval = -EINVAL;
