@@ -236,7 +236,7 @@ void *thread_function(void *threadparams)
         if (newlineflag)
         {
             if (strncmp(receive_buffer, aesdsocket.aesdioctl, strlen(aesdsocket.aesdioctl)) == 0)
-            {                              
+            {
                 write_to_file(receive_buffer, receive_buffer_writehead, 0);
             }
             else
@@ -364,6 +364,8 @@ static void send_file(int conn_fd)
         {
             perror("read():");
         }
+        if (read_data == 0)
+            break;
         printf("data read is %d \n", read_data);
 #ifndef USE_AESD_CHAR_DEVICE
         pthread_mutex_unlock(&aesdsocket.file_mutex);
