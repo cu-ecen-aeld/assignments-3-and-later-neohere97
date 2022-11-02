@@ -364,6 +364,7 @@ static void send_file(int conn_fd)
         {
             perror("read():");
         }
+        // To pass the ioctl case
         if (read_data == 0)
             break;
         printf("data read is %d \n", read_data);
@@ -395,13 +396,14 @@ static void write_to_file(char *buffer, int buffer_size, int ioctl_num)
 
     if (!ioctl_num)
     {
+        // If it's an ioctl command do ioctl and not write
         struct aesd_seekto seek_to;
 
         sscanf(buffer, "AESDCHAR_IOCSEEKTO:%d,%d", &seek_to.write_cmd, &seek_to.write_cmd_offset);
-        printf("doing IOCTL %d,%d \n\r", seek_to.write_cmd, seek_to.write_cmd_offset);
+        // printf("doing IOCTL %d,%d \n\r", seek_to.write_cmd, seek_to.write_cmd_offset);
         if (ioctl(aesdsocket.filefd, AESDCHAR_IOCSEEKTO, &seek_to))
         {
-            syslog(LOG_ERR, "Error in IOCTL, errno is %d\n", errno);
+            syslog(LOG_ERR, "Error IOCTL, errno :%d\n", errno);
         }
     }
     else
